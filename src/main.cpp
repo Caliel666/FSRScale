@@ -183,6 +183,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
+    bool fsrEnabled = fsrOk;
     if (cliMode && hasConsole()) {
       if (fsrOk) printCli(L"FSR OK: " + fsr.lastError());
       else       printCli(L"FSR FAIL (raw capture only): " + fsr.lastError());
@@ -202,6 +203,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     }
 
     overlayInit(inst, out);
+    overlaySetFsrEnabled(fsrEnabled);
     setOverlayHud(nullptr);
     setOverlayOpen(false);
     setStatus(out, label.c_str());
@@ -228,7 +230,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
-      if (overlayConsumeFsrToggle()) fsrOk = !fsrOk;
+      if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
       drawCursor();
 
       // If the target (game) window is gone, quit.  This happens when the
@@ -276,7 +278,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       ID3D12Resource* presentSrc = color.Get();
       bool usedFsr = false;
 
-      if (fsrOk && depth && mv && upscale) {
+      if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
         //   color:   COMMON  -> PS|NPS   (FSR & AMDOF read as SRV)
         //   depth:   UAV     -> PS|NPS   (FSR reads as SRV)
