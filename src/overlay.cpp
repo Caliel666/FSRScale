@@ -46,7 +46,7 @@ static void text(HDC dc,const wchar_t* s,RECT r,int size,COLORREF c,UINT flags=D
 static void icon(HDC dc,RECT r,int kind,bool active){
   HPEN p=CreatePen(PS_SOLID,2,active?RGB(255,92,92):RGB(220,220,225)); auto op=(HPEN)SelectObject(dc,p); HBRUSH ob=(HBRUSH)SelectObject(dc,GetStockObject(NULL_BRUSH));
   int cx=(r.left+r.right)/2,cy=(r.top+r.bottom)/2;
-  if(kind==0){ Rectangle(dc,cx-12,cy-9,cx+12,cy+9); Rectangle(dc,cx-6,cy-13,cx+6,cy-9); }
+  if(kind==0){ text(dc,L"FSR",RECT{cx-22,cy-10,cx+22,cy+10},12,active?RGB(255,92,92):RGB(220,220,225)); }
   else if(kind==1){ Ellipse(dc,cx-11,cy-11,cx+11,cy+11); text(dc,L"FPS",RECT{cx-20,cy-7,cx+20,cy+7},9,active?RGB(255,92,92):RGB(220,220,225)); }
   else if(kind==2){ RoundRect(dc,cx-13,cy-8,cx+13,cy+9,4,4); Ellipse(dc,cx-5,cy-4,cx+5,cy+6); MoveToEx(dc,cx-9,cy-8,nullptr); LineTo(dc,cx-5,cy-13); }
   else { Ellipse(dc,cx-4,cy-4,cx+4,cy+4); for(int i=0;i<8;i++){ double a=i*3.1415926535/4; MoveToEx(dc,cx+(int)(a?cos(a)*8:8),cy+(int)(sin(a)*8),nullptr); LineTo(dc,cx+(int)(cos(a)*13),cy+(int)(sin(a)*13)); } }
