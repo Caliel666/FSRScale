@@ -375,10 +375,6 @@ bool Capture::saveScreenshot(const std::wstring& folder, uint64_t frameIndex)
   bool ok=false;
   do {
     if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&fac))))break;
-    if(FAILED(fac->CreateBitmap(td.Width,td.Height,GUID_WICPixelFormat32bppBGRA,WICBitmapCacheOnLoad,&bmp)))break;
-    for(UINT y=0;y<td.Height;y++){ BYTE* dst=nullptr; if(FAILED(bmp->Lock(nullptr,nullptr)))break; dst=nullptr; break; }
-    // CreateBitmap cannot be filled directly, so use CreateBitmapFromMemory with the staging pitch.
-    bmp.Reset();
     if(FAILED(fac->CreateBitmapFromMemory(td.Width,td.Height,GUID_WICPixelFormat32bppBGRA,map.RowPitch,td.Height*map.RowPitch,(BYTE*)map.pData,&bmp)))break;
     if(FAILED(fac->CreateStream(&stream)))break;
     if(FAILED(stream->InitializeFromFilename(file.c_str(),GENERIC_WRITE)))break;
