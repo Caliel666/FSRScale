@@ -258,6 +258,15 @@ void drawCursor()
   HWND h = g_output;
   if (!h || !IsWindow(h)) return;
 
+  // Per-frame topmost re-assertion.  Some games call SetWindowPos or
+  // SetForegroundWindow on themselves which can push them above
+  // FSRScale even though we are HWND_TOPMOST.  Re-asserting every frame
+  // guarantees we stay on top without the user noticing a flicker.
+  if (!g_overlayOpen) {
+    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  }
+
   // In game mode the real cursor must be confined to the TARGET (game)
   // window's screen rect, not the FSRScale output window.  The game
   // window is behind our transparent (WS_EX_TRANSPARENT) presentation
@@ -391,13 +400,20 @@ static void applyOverlayActivation(bool open)
     SetWindowLongPtrW(h, GWL_EXSTYLE,
       ex | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED);
     SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
-    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
-      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    // Return focus toward the game if possible.
+
+    // Return focus toward the game FIRST — this lets the game receive
+    // keyboard input.  SetForegroundWindow can bring the game window to
+    // the top of the z-order, so we re-assert FSRScale's HWND_TOPMOST
+    // AFTER it to guarantee we stay above the game.
     if (g_target && IsWindow(g_target)) {
       AllowSetForegroundWindow(ASFW_ANY);
       SetForegroundWindow(g_target);
     }
+
+    // Re-assert HWND_TOPMOST AFTER SetForegroundWindow so the game window
+    // cannot end up above FSRScale.  This is the critical ordering fix.
+    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
   }
 }
 
