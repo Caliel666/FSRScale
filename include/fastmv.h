@@ -42,6 +42,7 @@ private:
   ComPtr<ID3D12Resource> m_prevLuma;
   ComPtr<ID3D12Resource> m_coarse;
   ComPtr<ID3D12Resource> m_refined;
+  ComPtr<ID3D12Resource> m_dummyGuess;
   ComPtr<ID3D12Resource> m_cb;
 
   ComPtr<ID3D12RootSignature> m_rs;
