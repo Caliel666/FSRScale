@@ -337,20 +337,69 @@ std::wstring targetUsage()
     return
         L"FSRScale - capture and upscale a window with FSR 3\n\n"
         L"  FSRScale.exe                    picker, 5 s countdown\n"
-        L"  FSRScale.exe -pid <id>         capture the window owned by PID\n"
-        L"  FSRScale.exe -pname <regex>    capture a process whose name matches regex\n"
-        L"  FSRScale.exe -window <regex>   capture a window title matching regex\n"
+        L"  FSRScale.exe -pid <id>          capture the window owned by PID\n"
+        L"  FSRScale.exe -pname <regex>     capture a process whose name matches regex\n"
+        L"  FSRScale.exe -window <regex>    capture a window title matching regex\n"
         L"  FSRScale.exe -front             continuously follow the foreground window\n"
-        L"  FSRScale.exe -delay <sec>      wait before starting capture\n"
-        L"  FSRScale.exe -nooverlay        disable the FSRScale HUD overlay\n"
+        L"  FSRScale.exe -delay <sec>       wait before starting capture\n"
+        L"  FSRScale.exe -nooverlay         disable the FSRScale HUD overlay\n"
         L"  FSRScale.exe --key ctrl+shift+a set the global stop hotkey\n"
-        L"  FSRScale.exe -help              show this text\n\n"
-        L"Long forms (--pid, --pname, --window, --front, --delay, --nooverlay, --key) are also accepted.\n"
-        L"Window and process names use case-insensitive ECMAScript regex matching.\n";
+        L"  FSRScale.exe --mv amdof|fast    select motion-vector implementation\n"
+        L"  FSRScale.exe --bindbypass home,insert,end,pageup,pagedown\n"
+        L"                                  OptiScaler/ReShade menu keys (not sent to game).\n"
+        L"                                  Default: Home,Insert,End,PageUp,PageDown.\n"
+        L"  FSRScale.exe --overlaykey ctrl+home\n"
+        L"                                  Toggle FSRScale HUD overlay (Steam-style).\n"
+        L"                                  Default: Ctrl+Home. When open, mouse is held\n"
+        L"                                  by FSRScale and not forwarded to the game.\n"
+        L"  FSRScale.exe -help              this message\n";
+}
+
+
+static void setDefaultBindBypass(TargetSpec& spec)
+{
+    if (spec.bindBypassExplicit) return;
+    spec.bindBypass.clear();
+    const UINT defs[] = { VK_HOME, VK_INSERT, VK_END, VK_PRIOR, VK_NEXT };
+    for (UINT vk : defs)
+        spec.bindBypass.push_back(TargetSpec::BypassKey{ 0, vk });
+    spec.bindBypassText = L"Home,Insert,End,PageUp,PageDown";
+}
+
+static bool parseBypassList(const std::wstring& text, TargetSpec& spec, std::wstring& error)
+{
+    spec.bindBypass.clear();
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t end = text.find(L',', start);
+        std::wstring part = text.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+        // trim
+        while (!part.empty() && iswspace(part.front())) part.erase(part.begin());
+        while (!part.empty() && iswspace(part.back())) part.pop_back();
+        if (!part.empty()) {
+            UINT mods = 0, vk = 0;
+            if (!parseHotkey(part, mods, vk)) {
+                error = L"invalid --bindbypass entry: " + part;
+                return false;
+            }
+            spec.bindBypass.push_back(TargetSpec::BypassKey{ mods, vk });
+        }
+        if (end == std::wstring::npos) break;
+        start = end + 1;
+    }
+    if (spec.bindBypass.empty()) {
+        error = L"--bindbypass requires at least one key (e.g. home,insert)";
+        return false;
+    }
+    spec.bindBypassText = text;
+    spec.bindBypassExplicit = true;
+    return true;
 }
 
 bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& error)
 {
+    setDefaultBindBypass(spec);
+
     bool explicitTarget = false;
     for (int i = 1; i < argc; ++i) {
         std::wstring arg = argv[i];
@@ -380,6 +429,19 @@ bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& e
             spec.mode = TargetMode::Process;
             spec.text = value;
             explicitTarget = true;
+        } else if (opt == L"--mv" || opt == L"-mv") {
+            if (!need(value)) return false;
+            std::wstring mv = lower(value);
+            if (mv == L"amdof") {
+                spec.motionMode = TargetSpec::MotionMode::AmdOf;
+                spec.motionModeText = L"amdof";
+            } else if (mv == L"fast") {
+                spec.motionMode = TargetSpec::MotionMode::Fast;
+                spec.motionModeText = L"fast";
+            } else {
+                error = L"invalid motion mode: " + value + L" (valid: amdof, fast)";
+                return false;
+            }
         } else if (opt == L"--front" || opt == L"-front") {
             spec.front = true;
             explicitTarget = true;
@@ -414,6 +476,16 @@ bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& e
             }
             if (!spec.delayExplicit) spec.delaySeconds = 5;
             if (spec.delaySeconds < 1) spec.delaySeconds = 1;
+        } else if (opt == L"--bindbypass" || opt == L"-bindbypass") {
+            if (!need(value)) return false;
+            if (!parseBypassList(value, spec, error)) return false;
+        } else if (opt == L"--overlaykey" || opt == L"-overlaykey") {
+            if (!need(value)) return false;
+            if (!parseHotkey(value, spec.overlayHotkeyModifiers, spec.overlayHotkeyVk)) {
+                error = L"invalid --overlaykey: " + value;
+                return false;
+            }
+            spec.overlayHotkeyText = value;
         } else {
             error = L"unknown option: " + arg;
             return false;
