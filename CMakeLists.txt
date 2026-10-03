@@ -128,6 +128,7 @@ add_executable(NRLive WIN32
   src/amdof.cpp
   src/fastmv.cpp
   src/ui.cpp
+  src/overlay.cpp
   src/target.cpp
 )
 
