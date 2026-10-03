@@ -354,8 +354,6 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
     // OptiScaler / ReShade ImGui can take mouse + keyboard.
     if (g_overlayOpen) return MA_ACTIVATE;
     return MA_NOACTIVATE;
-  case WM_INPUT:
-    return DefWindowProcW(h, m, w, l);
   case WM_MOUSEMOVE:
   case WM_LBUTTONDOWN: case WM_LBUTTONUP:
   case WM_RBUTTONDOWN: case WM_RBUTTONUP:
