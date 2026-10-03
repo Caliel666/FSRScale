@@ -259,14 +259,12 @@ void drawCursor()
   HWND h = g_output;
   if (!h || !IsWindow(h)) return;
 
-  // Per-frame topmost re-assertion.  Some games call SetWindowPos or
-  // SetForegroundWindow on themselves which can push them above
-  // NRLive even though we are HWND_TOPMOST.  Re-asserting every frame
-  // guarantees we stay on top without the user noticing a flicker.
-  if (!g_overlayOpen) {
-    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
-      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  }
+  // NOTE: We do NOT re-assert HWND_TOPMOST every frame here anymore.
+  // The per-frame SetWindowPos(HWND_TOPMOST) was fighting with the FPS
+  // overlay window's z-order, causing flickering.  The topmost position
+  // is re-asserted on overlay toggle in applyOverlayActivation(), which
+  // is sufficient — if a game jumps above NRLive during gameplay the user
+  // can toggle the overlay (Ctrl+Home) to re-assert.
 
   // In game mode the real cursor must be confined to the TARGET (game)
   // window's screen rect, not the NRLive output window.  The game
@@ -425,14 +423,18 @@ void setOverlayOpen(bool open)
     return;
   }
   g_overlayOpen = open;
-  overlaySetOpen(open);
 
   if (g_overlayHud && IsWindow(g_overlayHud)) {
     ShowWindow(g_overlayHud, open ? SW_SHOWNOACTIVATE : SW_HIDE);
     if (open) InvalidateRect(g_overlayHud, nullptr, FALSE);
   }
 
+  // IMPORTANT: applyOverlayActivation FIRST (sets NRLive to HWND_TOPMOST),
+  // THEN overlaySetOpen (shows top bar + FPS above NRLive).  If we do it in
+  // the other order, NRLive's topmost push puts it above the overlay windows
+  // and they become invisible.
   applyOverlayActivation(open);
+  overlaySetOpen(open);
 }
 void setScaleSizes(Size capture, Size output)
 {

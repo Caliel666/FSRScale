@@ -211,6 +211,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     bool reset = true, running = true;
     bool stopLatched = false;
     float fps = 0;
+    Size lastCs{};
     LARGE_INTEGER freq, last, now;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&last);
@@ -232,6 +233,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       pollBindBypass(out, spec);
       if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
       drawCursor();
+
+      // Update the overlay FPS meter every frame, even if no new capture
+      // frame arrived (e.g. game paused on focus loss).  Uses the last
+      // known fps/ms values so the FPS counter doesn't freeze.
+      {
+        QueryPerformanceCounter(&now);
+        float ms = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
+        last = now;
+        float f = (ms > 0.001f) ? (1000.0f / ms) : 0.0f;
+        fps = f;
+        Size csForOverlay = lastCs.w ? lastCs : render;
+        overlayUpdate(f, ms, csForOverlay, display);
+      }
 
       // If the target (game) window is gone, quit.  This happens when the
       // game exits — NRLive should not keep running with a dead target.
@@ -259,6 +273,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
       if (overlayConsumeScreenshot()) cap.saveScreenshot(overlayScreenshotPath(), cap.totalFrames());
+      lastCs = cs;
       setScaleSizes(cs, display);
       gfx.ensureAuxTextures(cs);
 
@@ -401,7 +416,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       hi.status = L"frames=" + std::to_wstring(cap.totalFrames()) +
                   (usedFsr ? L" FSR" : L" blit") +
                   L" | mv=" + spec.motionModeText + L" | " + spec.stopHotkeyText + L"=quit | " + spec.overlayHotkeyText + L"=overlay | bypass=" + (spec.bindBypassText.empty() ? std::wstring(L"default") : spec.bindBypassText);
-      overlayUpdate(fps, ms, cs, display);
       updateHud(nullptr, hi);
     }
 
