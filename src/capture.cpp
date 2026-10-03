@@ -1,0 +1,350 @@
+#include "capture.h"
+#include <windows.graphics.capture.interop.h>
+#include <windows.graphics.directx.direct3d11.interop.h>
+#include <DispatcherQueue.h>
+#include <algorithm>
+#include <chrono>
+
+using namespace winrt;
+using namespace winrt::Windows::Graphics::Capture;
+using namespace winrt::Windows::Graphics::DirectX;
+using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
+
+static std::wstring hex(HRESULT hr)
+{
+  wchar_t b[16]{};
+  swprintf_s(b, L"%08lX", (unsigned long)hr);
+  return b;
+}
+
+static GraphicsCaptureItem itemFromWindow(HWND hwnd)
+{
+  auto interop = get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+  GraphicsCaptureItem item{ nullptr };
+  check_hresult(interop->CreateForWindow(
+    hwnd, guid_of<GraphicsCaptureItem>(), reinterpret_cast<void**>(put_abi(item))));
+  return item;
+}
+
+static IDirect3DDevice makeWinrtDevice(ID3D11Device* d)
+{
+  ComPtr<IDXGIDevice> gd;
+  check_hresult(d->QueryInterface(IID_PPV_ARGS(gd.GetAddressOf())));
+  winrt::com_ptr<::IInspectable> insp;
+  check_hresult(CreateDirect3D11DeviceFromDXGIDevice(gd.Get(), insp.put()));
+  return insp.as<IDirect3DDevice>();
+}
+
+bool Capture::init(ID3D12Device* d12, ID3D12CommandQueue* q)
+{
+  m_d12 = d12;
+  m_q = q;
+
+  // Pure D3D11 device on the same adapter as D3D12 (Magpie style).
+  ComPtr<IDXGIFactory6> factory;
+  if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)))) {
+    m_error = L"DXGI factory failed"; return false;
+  }
+  LUID luid = m_d12->GetAdapterLuid();
+  ComPtr<IDXGIAdapter1> adapter;
+  for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i) {
+    DXGI_ADAPTER_DESC1 desc{};
+    adapter->GetDesc1(&desc);
+    if (desc.AdapterLuid.LowPart == luid.LowPart && desc.AdapterLuid.HighPart == luid.HighPart)
+      break;
+    adapter.Reset();
+  }
+
+  D3D_FEATURE_LEVEL fl{};
+  ComPtr<ID3D11DeviceContext> ctx;
+  HRESULT h = D3D11CreateDevice(
+    adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+    D3D11_SDK_VERSION, m_d11.GetAddressOf(), &fl, ctx.GetAddressOf());
+  if (FAILED(h)) {
+    // Fallback without adapter bind
+    h = D3D11CreateDevice(
+      nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+      D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+      D3D11_SDK_VERSION, m_d11.GetAddressOf(), &fl, ctx.GetAddressOf());
+  }
+  if (FAILED(h)) { m_error = L"D3D11CreateDevice 0x" + hex(h); return false; }
+  m_ctx = ctx;
+  m_d11.As(&m_d11_5);
+
+  try { m_winrtDevice = makeWinrtDevice(m_d11.Get()); }
+  catch (...) { m_error = L"WinRT D3D device failed"; return false; }
+
+  if (FAILED(m_d12->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&m_fence)))) {
+    m_error = L"Fence create failed"; return false;
+  }
+  if (FAILED(m_d12->CreateSharedHandle(m_fence.Get(), nullptr, GENERIC_ALL, nullptr, &m_fenceHandle))) {
+    m_error = L"Fence share failed"; return false;
+  }
+  if (m_d11_5) {
+    m_d11_5->OpenSharedFence(m_fenceHandle, IID_PPV_ARGS(&m_fence11));
+  }
+  return true;
+}
+
+bool Capture::createOutputTexture(Size size)
+{
+  m_size = size;
+  m_outD11.Reset();
+  m_outD12.Reset();
+  if (m_sharedHandle) { CloseHandle(m_sharedHandle); m_sharedHandle = nullptr; }
+
+  // D3D11 texture with NT shared handle → open on D3D12
+  D3D11_TEXTURE2D_DESC td{};
+  td.Width = size.w;
+  td.Height = size.h;
+  td.MipLevels = 1;
+  td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_DEFAULT;
+  td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+  td.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED;
+
+  HRESULT h = m_d11->CreateTexture2D(&td, nullptr, m_outD11.GetAddressOf());
+  if (FAILED(h)) { m_error = L"D3D11 out tex 0x" + hex(h); return false; }
+
+  ComPtr<IDXGIResource1> res1;
+  if (FAILED(m_outD11.As(&res1))) { m_error = L"IDXGIResource1 missing"; return false; }
+  if (FAILED(res1->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+                                      nullptr, &m_sharedHandle))) {
+    m_error = L"CreateSharedHandle failed"; return false;
+  }
+
+  // Open on D3D12
+  if (FAILED(m_d12->OpenSharedHandle(m_sharedHandle, IID_PPV_ARGS(&m_outD12)))) {
+    m_error = L"D3D12 OpenSharedHandle failed"; return false;
+  }
+  return true;
+}
+
+bool Capture::start(HWND hwnd)
+{
+  m_frameCount = 0;
+  m_fenceValue = 0;
+  m_started = false;
+  m_hwnd = hwnd;
+
+  try {
+    m_item = itemFromWindow(hwnd);
+    auto itemSize = m_item.Size();
+    if (itemSize.Width <= 0 || itemSize.Height <= 0) {
+      m_error = L"Window reports zero size"; return false;
+    }
+    m_windowSize = { (uint32_t)itemSize.Width, (uint32_t)itemSize.Height };
+    // Compute the client-area crop rect for this window so we can exclude
+    // the title bar / borders when scaling a windowed-mode target.
+    recomputeClientArea(hwnd);
+    if (m_size.w == 0 || m_size.h == 0) {
+      m_error = L"Client area is zero"; return false;
+    }
+    if (!createOutputTexture(m_size)) return false;
+
+    // Magpie: Create with 4 buffers, size = captured frame size (full window).
+    // Prefer CreateFreeThreaded so we don't need a DispatcherQueue controller.
+    // FrameArrived is intentionally EMPTY — only forces a wake; we poll on
+    // the render thread exactly like Magpie _Update().
+    m_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
+      m_winrtDevice,
+      DirectXPixelFormat::B8G8R8A8UIntNormalized,
+      4,
+      itemSize);
+
+    m_arrived = m_pool.FrameArrived(winrt::auto_revoke,
+      [](auto&&, auto&&) {
+        // Magpie: callback does nothing. Presence of the subscription makes
+        // WGC keep delivering frames and posts a thread message.
+      });
+
+    m_session = m_pool.CreateCaptureSession(m_item);
+
+    if (winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(
+          winrt::name_of<GraphicsCaptureSession>(), L"IsCursorCaptureEnabled")) {
+      m_session.IsCursorCaptureEnabled(false);
+    }
+    if (winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(
+          winrt::name_of<GraphicsCaptureSession>(), L"IsBorderRequired")) {
+      m_session.IsBorderRequired(false);
+    }
+    // Win11 24H2: required for >60fps capture (Magpie does this)
+    if (winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(
+          winrt::name_of<GraphicsCaptureSession>(), L"MinUpdateInterval")) {
+      try {
+        m_session.MinUpdateInterval(std::chrono::milliseconds(1));
+      } catch (...) {}
+    }
+
+    m_session.StartCapture();
+    m_started = true;
+    return true;
+  } catch (const winrt::hresult_error& e) {
+    m_error = L"WGC start 0x" + hex(e.code()) + L" " + std::wstring(e.message());
+    return false;
+  } catch (...) {
+    m_error = L"WGC start failed";
+    return false;
+  }
+}
+
+// Compute the client area of `hwnd` and store its offset inside the captured
+// frame plus its size.  For a borderless fullscreen window the offset is
+// (0,0) and the client size equals the window size, so the per-frame copy
+// degrades to a full-frame CopySubresourceRegion (same as before).
+void Capture::recomputeClientArea(HWND hwnd)
+{
+  if (!hwnd || !IsWindow(hwnd)) {
+    m_clientOffsetX = 0;
+    m_clientOffsetY = 0;
+    m_size = m_windowSize;
+    return;
+  }
+  RECT clientRect{};
+  if (!GetClientRect(hwnd, &clientRect)) {
+    m_clientOffsetX = 0;
+    m_clientOffsetY = 0;
+    m_size = m_windowSize;
+    return;
+  }
+  // Client area top-left in screen coords.
+  POINT pt{ 0, 0 };
+  ClientToScreen(hwnd, &pt);
+  RECT windowRect{};
+  if (!GetWindowRect(hwnd, &windowRect)) {
+    m_clientOffsetX = 0;
+    m_clientOffsetY = 0;
+    m_size = m_windowSize;
+    return;
+  }
+  const int ox = pt.x - windowRect.left;
+  const int oy = pt.y - windowRect.top;
+  const int cw = clientRect.right - clientRect.left;
+  const int ch = clientRect.bottom - clientRect.top;
+  // Clamp — if anything looks wrong, fall back to (0,0) offset + window size.
+  if (ox < 0 || oy < 0 || cw <= 0 || ch <= 0 ||
+      (UINT)ox + (UINT)cw > m_windowSize.w ||
+      (UINT)oy + (UINT)ch > m_windowSize.h) {
+    m_clientOffsetX = 0;
+    m_clientOffsetY = 0;
+    m_size = m_windowSize;
+    return;
+  }
+  m_clientOffsetX = (UINT)ox;
+  m_clientOffsetY = (UINT)oy;
+  m_size = { (uint32_t)cw, (uint32_t)ch };
+}
+
+bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue)
+{
+  if (!m_started || !m_pool) return false;
+
+  // Magpie _Update(): poll + drain to the newest frame
+  Direct3D11CaptureFrame frame{ nullptr };
+  try {
+    frame = m_pool.TryGetNextFrame();
+  } catch (...) {
+    return false;
+  }
+  if (!frame) return false;
+
+  try {
+    while (true) {
+      auto next = m_pool.TryGetNextFrame();
+      if (!next) break;
+      frame = std::move(next);
+    }
+  } catch (...) {}
+
+  ComPtr<ID3D11Texture2D> src;
+  try {
+    auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+    if (FAILED(access->GetInterface(IID_PPV_ARGS(&src)))) return false;
+  } catch (...) {
+    return false;
+  }
+
+  D3D11_TEXTURE2D_DESC td{};
+  src->GetDesc(&td);
+
+  // td describes the captured frame's size, which is the FULL window size
+  // (including title bar / borders).  We track that separately as
+  // m_windowSize so we can detect when the window was resized.
+  if (td.Width != m_windowSize.w || td.Height != m_windowSize.h) {
+    // Window was resized — recompute the client-area crop and rebuild the
+    // output texture + frame pool.
+    m_windowSize = { (uint32_t)std::max(1u, td.Width), (uint32_t)std::max(1u, td.Height) };
+    recomputeClientArea(m_hwnd);
+    if (m_size.w == 0 || m_size.h == 0) return false;
+    if (!createOutputTexture(m_size)) return false;
+    try {
+      m_pool.Recreate(m_winrtDevice, DirectXPixelFormat::B8G8R8A8UIntNormalized, 4,
+                      { (int32_t)m_windowSize.w, (int32_t)m_windowSize.h });
+    } catch (...) {}
+    // Drop this frame; next acquire uses new sizes.
+    return false;
+  }
+
+  // Copy only the client-area portion of the captured frame into our output
+  // texture.  For a borderless fullscreen window the offset is (0,0) and the
+  // box covers the whole frame, so this is equivalent to the old
+  // CopyResource path.  For a windowed-mode window this crops out the
+  // title bar / borders so FSR only sees the game content.
+  D3D11_BOX srcBox{};
+  srcBox.left   = m_clientOffsetX;
+  srcBox.top    = m_clientOffsetY;
+  srcBox.right  = m_clientOffsetX + m_size.w;
+  srcBox.bottom = m_clientOffsetY + m_size.h;
+  srcBox.front  = 0;
+  srcBox.back   = 1;
+  // NULL src box == full resource.  When the client area covers the entire
+  // captured frame (fullscreen), CopySubresourceRegion with an explicit box
+  // that covers everything is equivalent to CopyResource — no perf penalty.
+  m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0,
+                               src.Get(), 0, &srcBox);
+
+  // Publish to D3D12 via shared fence. Prefer ID3D11Fence::Signal (no Flush).
+  // Flush() every frame was a major source of stutter (full GPU pipeline drain).
+  const uint64_t fv = ++m_fenceValue;
+  if (m_fence11) {
+    ComPtr<ID3D11DeviceContext4> ctx4;
+    if (SUCCEEDED(m_ctx.As(&ctx4))) {
+      ctx4->Signal(m_fence11.Get(), fv);
+    } else {
+      m_ctx->Flush(); // only if we cannot Signal
+    }
+  } else {
+    m_ctx->Flush();
+    m_q->Signal(m_fence.Get(), fv);
+  }
+
+  out = m_outD12;
+  size = m_size;
+  fenceValue = fv;
+  m_frameCount.fetch_add(1);
+  // frame destroyed here → returns buffer to the pool
+  return true;
+}
+
+void Capture::stop()
+{
+  m_started = false;
+  m_arrived.revoke();
+  try { if (m_session) m_session.Close(); } catch (...) {}
+  m_session = nullptr;
+  try { if (m_pool) m_pool.Close(); } catch (...) {}
+  m_pool = nullptr;
+  if (m_ctx) m_ctx->Flush();
+  m_outD11.Reset();
+  m_outD12.Reset();
+  if (m_sharedHandle) { CloseHandle(m_sharedHandle); m_sharedHandle = nullptr; }
+  m_item = nullptr;
+  m_hwnd = nullptr;
+  m_size = {};
+  m_windowSize = {};
+  m_clientOffsetX = 0;
+  m_clientOffsetY = 0;
+}

@@ -1,0 +1,6 @@
+[Inputs]
+EnableFfxInputs=true
+UseFfxInputs=true
+
+[FSR]
+UpscalerIndex=1
