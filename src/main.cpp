@@ -258,7 +258,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
-      if (overlayConsumeScreenshot()) cap.saveScreenshot(L"", cap.totalFrames());
+      if (overlayConsumeScreenshot()) cap.saveScreenshot(overlayScreenshotPath(), cap.totalFrames());
       setScaleSizes(cs, display);
       gfx.ensureAuxTextures(cs);
 
