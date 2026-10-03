@@ -39,33 +39,6 @@ static LONG_PTR g_savedExStyle = 0;
 // WM_MOUSE* messages. The target remains foreground and receives the same raw
 // input itself; FSRScale only keeps the presentation cursor clipped to output.
 static bool g_rawMouseRegistered = false;
-static LONG g_cursorX = 0;
-static LONG g_cursorY = 0;
-static bool g_cursorInitialized = false;
-
-static bool outputScreenRect(RECT& out)
-{
-  HWND h = g_output;
-  if (!h || !IsWindow(h)) return false;
-  RECT rc{};
-  if (!GetClientRect(h, &rc)) return false;
-  POINT tl{ rc.left, rc.top }, br{ rc.right, rc.bottom };
-  ClientToScreen(h, &tl);
-  ClientToScreen(h, &br);
-  out = { tl.x, tl.y, br.x, br.y };
-  return out.right > out.left && out.bottom > out.top;
-}
-
-static void initializeGameCursor()
-{
-  RECT rc{};
-  if (!outputScreenRect(rc)) return;
-  POINT p{};
-  if (!GetCursorPos(&p)) return;
-  g_cursorX = std::clamp<LONG>(p.x, rc.left, rc.right - 1);
-  g_cursorY = std::clamp<LONG>(p.y, rc.top, rc.bottom - 1);
-  g_cursorInitialized = true;
-}
 
 static void registerRawMouse(HWND hwnd)
 {
@@ -144,6 +117,8 @@ static void applyOverlayActivation(bool open)
   if (!h || !IsWindow(h)) return;
 
   if (open) {
+    LONG_PTR style = GetWindowLongPtrW(h, GWL_EXSTYLE);
+    SetWindowLongPtrW(h, GWL_EXSTYLE, style & ~WS_EX_TRANSPARENT);
     // OptiScaler / ReShade need a real activatable, focused window.
     g_savedExStyle = GetWindowLongPtrW(h, GWL_EXSTYLE);
     SetWindowLongPtrW(h, GWL_EXSTYLE,
@@ -171,7 +146,7 @@ static void applyOverlayActivation(bool open)
     // Restore non-activating presentation surface so the game keeps input.
     LONG_PTR ex = g_savedExStyle ? g_savedExStyle
       : (WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
-    SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_TOPMOST | WS_EX_NOACTIVATE);
+    SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT);
     SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     // Return focus toward the game if possible.
@@ -219,6 +194,9 @@ static void registerClass(const wchar_t* name, WNDPROC proc)
 static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
   switch (m) {
+  case WM_NCHITTEST:
+    if (!g_overlayOpen) return HTTRANSPARENT;
+    return DefWindowProcW(h, m, w, l);
   case WM_MOUSEACTIVATE:
     // Game mode: never steal activation. Overlay mode: accept activation so
     // OptiScaler / ReShade ImGui can take mouse + keyboard.
@@ -331,7 +309,9 @@ void setOutputFullscreen(HWND h, HMONITOR mon)
   MONITORINFO mi{ sizeof(mi) };
   GetMonitorInfoW(mon, &mi);
   SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP);
-  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+  SetWindowLongPtrW(h, GWL_EXSTYLE,
+    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
+    (g_overlayOpen ? 0 : WS_EX_TRANSPARENT));
   SetWindowPos(h, HWND_TOPMOST,
                mi.rcMonitor.left, mi.rcMonitor.top,
                mi.rcMonitor.right - mi.rcMonitor.left,
