@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
+#include <vector>
 #include <algorithm>
 #include <chrono>
 #include <thread>
@@ -21,6 +22,66 @@ static void printCli(const std::wstring& text)
   DWORD n = 0;
   WriteConsoleW(h, text.c_str(), (DWORD)text.size(), &n, nullptr);
   WriteConsoleW(h, L"\r\n", 2, &n, nullptr);
+}
+
+
+static bool keyComboDown(UINT modifiers, UINT vk)
+{
+  auto down = [](int v) { return (GetAsyncKeyState(v) & 0x8000) != 0; };
+  // Required modifiers must be down.
+  if ((modifiers & MOD_CONTROL) && !down(VK_CONTROL)) return false;
+  if ((modifiers & MOD_SHIFT) && !down(VK_SHIFT)) return false;
+  if ((modifiers & MOD_ALT) && !down(VK_MENU)) return false;
+  if ((modifiers & MOD_WIN) && !down(VK_LWIN) && !down(VK_RWIN)) return false;
+  // Extra modifiers must NOT be down (so Ctrl+Home is not also "Home").
+  if (!(modifiers & MOD_CONTROL) && down(VK_CONTROL)) return false;
+  if (!(modifiers & MOD_SHIFT) && down(VK_SHIFT)) return false;
+  if (!(modifiers & MOD_ALT) && down(VK_MENU)) return false;
+  if (!(modifiers & MOD_WIN) && (down(VK_LWIN) || down(VK_RWIN))) return false;
+  return down((int)vk);
+}
+
+// Rising-edge inject of overlay bypass keys into our output window.
+
+static void pollOverlayToggle(const TargetSpec& spec)
+{
+  static bool prev = false;
+  const bool now = keyComboDown(spec.overlayHotkeyModifiers, spec.overlayHotkeyVk);
+  if (now && !prev)
+    setOverlayOpen(!isOverlayOpen());
+  prev = now;
+}
+
+static void pollBindBypass(HWND out, const TargetSpec& spec)
+{
+  // Overlay mode already focuses our window: physical keys reach OptiScaler /
+  // ReShade once. Injecting again would double-toggle menus.
+  if (isOverlayOpen()) {
+    static bool prevOpen[64]{};
+    // Keep edge state in sync so we don't fire a stale edge on close.
+    const size_t n = spec.bindBypass.size() < 64 ? spec.bindBypass.size() : 64;
+    for (size_t i = 0; i < n; ++i)
+      prevOpen[i] = keyComboDown(spec.bindBypass[i].modifiers, spec.bindBypass[i].vk);
+    return;
+  }
+
+  static bool prev[64]{};
+  const size_t n = spec.bindBypass.size() < 64 ? spec.bindBypass.size() : 64;
+  for (size_t i = 0; i < n; ++i) {
+    const auto& b = spec.bindBypass[i];
+    const bool now = keyComboDown(b.modifiers, b.vk);
+    if (now && !prev[i]) {
+      HWND dest = out;
+      if (dest) {
+        UINT scan = MapVirtualKeyW(b.vk, MAPVK_VK_TO_VSC);
+        LPARAM lpDown = 1 | (LPARAM)(scan << 16);
+        LPARAM lpUp = 1 | (LPARAM)(scan << 16) | (1 << 30) | (1 << 31);
+        PostMessageW(dest, WM_KEYDOWN, b.vk, lpDown);
+        PostMessageW(dest, WM_KEYUP, b.vk, lpUp);
+      }
+    }
+    prev[i] = now;
+  }
 }
 
 static bool stopHotkeyDown(UINT modifiers, UINT vk)
@@ -72,6 +133,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
   constexpr int kStopId = 0x4653;
   bool hk = RegisterHotKey(nullptr, kStopId,
       spec.stopHotkeyModifiers | MOD_NOREPEAT, spec.stopHotkeyVk) != 0;
+
+  // Overlay keybind bypass: these VKs are not forwarded to the game and are
+  // re-injected into our output HWND so OptiScaler / ReShade menus receive them.
+  {
+    std::vector<UINT> vks;
+    vks.reserve(spec.bindBypass.size());
+    for (const auto& b : spec.bindBypass) vks.push_back(b.vk);
+    setBindBypassVks(vks.data(), vks.size());
+  }
+
 
   HMONITOR mon = MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST);
   MONITORINFO mi{ sizeof(mi) };
@@ -130,6 +201,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     }
 
     HWND hud = spec.noOverlay ? nullptr : createHud(inst, out);
+    setOverlayHud(hud);
+    setOverlayOpen(false); // Steam-style: hidden until overlay key
     setStatus(out, label.c_str());
 
     bool reset = true, running = true;
@@ -140,7 +213,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     QueryPerformanceCounter(&last);
 
     ShowWindow(out, SW_SHOWNOACTIVATE);
-    if (hud) ShowWindow(hud, SW_SHOWNOACTIVATE);
+    /* HUD starts hidden; Ctrl+Home (or --overlaykey) toggles it */
 
     while (running) {
       MSG msg{};
@@ -152,6 +225,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
       if (!running) break;
 
+      pollOverlayToggle(spec);
+      pollBindBypass(out, spec);
       if (stopHotkeyDown(spec.stopHotkeyModifiers, spec.stopHotkeyVk)) {
         if (!stopLatched) { running = false; break; }
         stopLatched = true;
@@ -308,10 +383,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       hi.fps = fps;
       hi.capture = cs;
       hi.output = display;
-      hi.visible = !spec.noOverlay;
+      hi.visible = !spec.noOverlay && isOverlayOpen();
       hi.status = L"frames=" + std::to_wstring(cap.totalFrames()) +
                   (usedFsr ? L" FSR" : L" blit") +
-                  L" | mv=" + spec.motionModeText + L" | " + spec.stopHotkeyText + L"=quit";
+                  L" | mv=" + spec.motionModeText + L" | " + spec.stopHotkeyText + L"=quit | " + spec.overlayHotkeyText + L"=overlay | bypass=" + (spec.bindBypassText.empty() ? std::wstring(L"default") : spec.bindBypassText);
       updateHud(hud, hi);
     }
 

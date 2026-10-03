@@ -18,6 +18,13 @@ void setStatus(HWND hwnd, const wchar_t* text);
 HWND createHud(HINSTANCE inst, HWND owner);
 void updateHud(HWND hud, const HudInfo& info);
 
-// Input redirection: which window receives mapped mouse/keyboard.
 void setCaptureTarget(HWND target);
 void setScaleSizes(Size capture, Size output);
+void setBindBypassVks(const UINT* vks, size_t count);
+
+// Steam-style overlay: HUD + mouse not forwarded to game + cursor clipped
+// to the presentation (game view) rectangle.
+void setOverlayOpen(bool open);
+bool isOverlayOpen();
+void setOverlayHud(HWND hud);
+HWND outputHwnd(); // main presentation window

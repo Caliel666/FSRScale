@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <string>
+#include <vector>
 
 enum class TargetMode { Picker, Pid, Window, Process };
 
@@ -19,6 +20,21 @@ struct TargetSpec {
   UINT stopHotkeyModifiers = MOD_CONTROL | MOD_SHIFT;
   UINT stopHotkeyVk = 'A';
   std::wstring stopHotkeyText = L"Ctrl+Shift+A";
+
+  // Overlay menu keys (OptiScaler / ReShade): not forwarded to the game;
+  // injected into our output window so the overlay receives them.
+  struct BypassKey {
+    UINT modifiers = 0;
+    UINT vk = 0;
+  };
+  std::vector<BypassKey> bindBypass;
+  std::wstring bindBypassText; // human-readable
+  bool bindBypassExplicit = false;
+
+  // Steam-style FSRScale overlay toggle (default Ctrl+Home).
+  UINT overlayHotkeyModifiers = MOD_CONTROL;
+  UINT overlayHotkeyVk = VK_HOME;
+  std::wstring overlayHotkeyText = L"Ctrl+Home";
 };
 
 bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& error);
