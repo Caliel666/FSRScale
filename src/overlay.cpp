@@ -101,17 +101,6 @@ static void updateFpsPos(){
   if(g_cfg.position==1)x=o.right-w-16; if(g_cfg.position==2)y=o.bottom-h-16; if(g_cfg.position==3){x=o.right-w-16;y=o.bottom-h-16;}
   SetWindowPos(g_fps,HWND_TOPMOST,x,y,w,h,SWP_NOACTIVATE|(g_fpsVisible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));
 }
-static void updateFpsPos(){
-  if(!g_fps||!IsWindow(g_fps)||!g_output)return;
-  RECT o{}; GetWindowRect(g_output,&o);
-  int w=190;
-  int h=24+(g_cfg.fps?(g_cfg.fontSize+12):0)+(g_cfg.frametime?24:0)+(g_cfg.resolution?24:0);
-  int x=o.left+16,y=o.top+16;
-  if(g_cfg.position==1)x=o.right-w-16;
-  if(g_cfg.position==2)y=o.bottom-h-16;
-  if(g_cfg.position==3){x=o.right-w-16;y=o.bottom-h-16;}
-  SetWindowPos(g_fps,HWND_TOPMOST,x,y,w,h,SWP_NOACTIVATE|(g_fpsVisible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));
-}
 static LRESULT CALLBACK fpsProc(HWND h,UINT m,WPARAM w,LPARAM l){if(m==WM_PAINT){PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);paintFps(dc);EndPaint(h,&ps);return 0;}if(m==WM_NCHITTEST)return HTTRANSPARENT;return DefWindowProcW(h,m,w,l);}
 bool overlayInit(HINSTANCE inst,HWND output){
   if(g_initialized)return true;g_output=output;loadCfg();
