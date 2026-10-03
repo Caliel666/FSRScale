@@ -1,4 +1,6 @@
 #include "capture.h"
+#include <wincodec.h>
+#include <shlobj.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <DispatcherQueue.h>
@@ -348,4 +350,48 @@ void Capture::stop()
   m_windowSize = {};
   m_clientOffsetX = 0;
   m_clientOffsetY = 0;
+}
+
+bool Capture::saveScreenshot(const std::wstring& folder, uint64_t frameIndex)
+{
+  if (!m_outD11 || !m_d11 || !m_ctx) return false;
+  D3D11_TEXTURE2D_DESC td{}; m_outD11->GetDesc(&td);
+  td.Usage=D3D11_USAGE_STAGING; td.BindFlags=0; td.CPUAccessFlags=D3D11_CPU_ACCESS_READ; td.MiscFlags=0;
+  ComPtr<ID3D11Texture2D> staging;
+  if (FAILED(m_d11->CreateTexture2D(&td,nullptr,&staging))) return false;
+  m_ctx->CopyResource(staging.Get(),m_outD11.Get());
+  m_ctx->Flush();
+  D3D11_MAPPED_SUBRESOURCE map{};
+  if (FAILED(m_ctx->Map(staging.Get(),0,D3D11_MAP_READ,0,&map))) return false;
+  std::wstring dir=folder;
+  if(dir.empty()){ wchar_t p[MAX_PATH*4]{}; SHGetFolderPathW(nullptr,CSIDL_MYPICTURES,nullptr,SHGFP_TYPE_CURRENT,p); dir=p; if(!dir.empty()&&dir.back()!=L'\\')dir+=L'\\'; dir+=L"NRLive"; }
+  CreateDirectoryW(dir.c_str(),nullptr);
+  SYSTEMTIME st{}; GetLocalTime(&st); wchar_t name[128]{};
+  swprintf_s(name,L"NRLive_%04u%02u%02u_%02u%02u%02u_%llu.png",st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond,(unsigned long long)frameIndex);
+  std::wstring file=dir+L"\\"+name;
+  HRESULT hr=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+  bool uninit=SUCCEEDED(hr);
+  ComPtr<IWICImagingFactory> fac; ComPtr<IWICBitmap> bmp; ComPtr<IWICStream> stream; ComPtr<IWICBitmapEncoder> enc; ComPtr<IWICBitmapFrameEncode> frame;
+  bool ok=false;
+  do {
+    if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&fac))))break;
+    if(FAILED(fac->CreateBitmap(td.Width,td.Height,GUID_WICPixelFormat32bppBGRA,WICBitmapCacheOnLoad,&bmp)))break;
+    for(UINT y=0;y<td.Height;y++){ BYTE* dst=nullptr; if(FAILED(bmp->Lock(nullptr,nullptr)))break; dst=nullptr; break; }
+    // CreateBitmap cannot be filled directly, so use CreateBitmapFromMemory with the staging pitch.
+    bmp.Reset();
+    if(FAILED(fac->CreateBitmapFromMemory(td.Width,td.Height,GUID_WICPixelFormat32bppBGRA,map.RowPitch,td.Height*map.RowPitch,(BYTE*)map.pData,&bmp)))break;
+    if(FAILED(fac->CreateStream(&stream)))break;
+    if(FAILED(stream->InitializeFromFilename(file.c_str(),GENERIC_WRITE)))break;
+    if(FAILED(fac->CreateEncoder(GUID_ContainerFormatPng,nullptr,&enc)))break;
+    if(FAILED(enc->Initialize(stream.Get(),WICBitmapEncoderNoCache)))break;
+    if(FAILED(enc->CreateNewFrame(&frame,nullptr)))break;
+    if(FAILED(frame->Initialize(nullptr)))break;
+    if(FAILED(frame->WriteSource(bmp.Get(),nullptr)))break;
+    if(FAILED(frame->Commit()))break;
+    if(FAILED(enc->Commit()))break;
+    ok=true;
+  } while(false);
+  m_ctx->Unmap(staging.Get(),0);
+  if(uninit) CoUninitialize();
+  return ok;
 }
