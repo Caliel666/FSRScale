@@ -185,7 +185,10 @@ static void applyOverlayActivation(bool open)
 
 void setOverlayOpen(bool open)
 {
-  if (g_overlayOpen == open) return;
+  if (g_overlayOpen == open) {
+    if (!open && GetCapture() == g_output) ReleaseCapture();
+    return;
+  }
   g_overlayOpen = open;
 
   if (g_overlayHud && IsWindow(g_overlayHud)) {
@@ -240,8 +243,11 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
       clipCursorToOutput(true);
       return DefWindowProcW(h, m, w, l);
     }
-    // Game mode: the target is foreground and receives the real mouse/raw
-    // input. Do not post synthetic WM_MOUSE messages to it.
+    // Game mode: this window must NEVER own mouse capture.
+    if (GetCapture() == h) ReleaseCapture();
+    return 0;
+  case WM_CAPTURECHANGED:
+    if (!g_overlayOpen && GetCapture() == h) ReleaseCapture();
     return 0;
   case WM_SETCURSOR:
     // Never overwrite the game's cursor from the presentation window.
@@ -262,6 +268,7 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
     PostQuitMessage(0);
     return 0;
   case WM_DESTROY:
+    if (GetCapture() == h) ReleaseCapture();
     unregisterRawMouse();
     ClipCursor(nullptr);
     PostQuitMessage(0);
