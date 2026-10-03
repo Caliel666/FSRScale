@@ -228,6 +228,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
       drawCursor();
+
+      // If the target (game) window is gone, quit.  This happens when the
+      // game exits — FSRScale should not keep running with a dead target.
+      if (!target || !IsWindow(target)) {
+        running = false;
+        break;
+      }
+
       if (stopHotkeyDown(spec.stopHotkeyModifiers, spec.stopHotkeyVk)) {
         if (!stopLatched) { running = false; break; }
         stopLatched = true;

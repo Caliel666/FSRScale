@@ -480,7 +480,10 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
       PostMessageW(g_target, m, w, l);
     return DefWindowProcW(h, m, w, l);
   case WM_CLOSE:
-    PostQuitMessage(0);
+    // Standard pattern: WM_CLOSE → DestroyWindow → WM_DESTROY → PostQuitMessage.
+    // DestroyWindow sends WM_DESTROY which does the cleanup (release capture,
+    // restore cursor, destroy cursor window, etc.) and then PostQuitMessage.
+    DestroyWindow(h);
     return 0;
   case WM_DESTROY:
     if (GetCapture() == h) ReleaseCapture();
