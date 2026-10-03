@@ -1,0 +1,13 @@
+{
+  "target_mode": "picker",
+  "pid": "",
+  "process": "",
+  "window": "",
+  "delay": 5,
+  "no_overlay": false,
+  "motion": "amdof",
+  "stop_key": "ctrl+shift+a",
+  "overlay_key": "ctrl+home",
+  "bind_bypass": "home,insert,end,pageup,pagedown",
+  "exe_path": ""
+}
