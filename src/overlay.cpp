@@ -1,6 +1,7 @@
 #include "overlay.h"
 #include <windowsx.h>
 #include <shlobj.h>
+#include <commdlg.h>
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
@@ -307,34 +308,57 @@ static void paintSettings(HWND h, HDC dc) {
   HBRUSH bg = CreateSolidBrush(C_SET_BG);
   FillRect(dc, &rc, bg); DeleteObject(bg);
 
-  HFONT fTitle = makeFont(22, true);
+  // Title bar (draggable area)
+  HBRUSH titleBar = CreateSolidBrush(RGB(20,21,27));
+  RECT tr{0, 0, rc.right, 48};
+  FillRect(dc, &tr, titleBar); DeleteObject(titleBar);
+
+  HFONT fTitle = makeFont(18, true);
   HFONT old = (HFONT)SelectObject(dc, fTitle);
   SetBkMode(dc, TRANSPARENT);
   SetTextColor(dc, RGB(245,245,248));
-  RECT r1{24, 16, rc.right - 24, 50};
+  RECT r1{24, 12, rc.right - 24, 42};
   DrawTextW(dc, L"NRLive Settings", -1, &r1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+  // Drag hint
+  SetTextColor(dc, RGB(100,100,110));
+  HFONT fHint = makeFont(10, false);
+  SelectObject(dc, fHint);
+  RECT rDrag{rc.right - 120, 12, rc.right - 24, 42};
+  DrawTextW(dc, L"drag to move", -1, &rDrag, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
   SelectObject(dc, old);
   DeleteObject(fTitle);
-
-  // Section labels
-  HFONT fLabel = makeFont(14, true);
-  old = (HFONT)SelectObject(dc, fLabel);
-  SetTextColor(dc, C_ACCENT);
-  RECT r2{24, 64, rc.right - 24, 84};
-  DrawTextW(dc, L"FPS Overlay", -1, &r2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-  RECT r3{24, 180, rc.right - 24, 200};
-  DrawTextW(dc, L"Screenshot Folder", -1, &r3, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-  SelectObject(dc, old);
-  DeleteObject(fLabel);
-
-  // Hint text
-  HFONT fHint = makeFont(11, false);
-  old = (HFONT)SelectObject(dc, fHint);
-  SetTextColor(dc, RGB(135,135,145));
-  RECT r4{24, rc.bottom - 40, rc.right - 24, rc.bottom - 16};
-  DrawTextW(dc, L"Settings are saved to scaleconfig.ini next to NRLive.exe", -1, &r4, DT_LEFT | DT_TOP | DT_WORDBREAK);
-  SelectObject(dc, old);
   DeleteObject(fHint);
+
+  // Section labels with accent underline
+  auto drawSection = [&](const wchar_t* title, int y) {
+    HFONT f = makeFont(13, true);
+    auto o = (HFONT)SelectObject(dc, f);
+    SetTextColor(dc, C_ACCENT);
+    RECT sr{24, y, rc.right - 24, y + 20};
+    DrawTextW(dc, title, -1, &sr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    // Underline
+    HPEN pen = CreatePen(PS_SOLID, 1, RGB(50,52,60));
+    auto op = (HPEN)SelectObject(dc, pen);
+    MoveToEx(dc, 24, y + 22, nullptr);
+    LineTo(dc, rc.right - 24, y + 22);
+    SelectObject(dc, op);
+    DeleteObject(pen);
+    SelectObject(dc, o);
+    DeleteObject(f);
+  };
+
+  drawSection(L"FPS OVERLAY", 58);
+  drawSection(L"APPEARANCE", 190);
+  drawSection(L"SCREENSHOT", 310);
+
+  // Bottom hint
+  HFONT fBottom = makeFont(10, false);
+  old = (HFONT)SelectObject(dc, fBottom);
+  SetTextColor(dc, RGB(100,100,110));
+  RECT r4{24, rc.bottom - 28, rc.right - 24, rc.bottom - 8};
+  DrawTextW(dc, L"Saved to scaleconfig.ini", -1, &r4, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+  SelectObject(dc, old);
+  DeleteObject(fBottom);
 }
 
 // ── Window procedures ─────────────────────────────────────────────────────
@@ -351,13 +375,18 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       RECT b = btnRect(i);
       if (PtInRect(&b, p)) {
         if (i == 0) { g_fsr = !g_fsr; g_toggleFsr = true; }
-        else if (i == 1) { g_fpsVisible = !g_fpsVisible; saveCfg(); }
+        else if (i == 1) {
+          g_fpsVisible = !g_fpsVisible; saveCfg();
+          // Immediately show/hide the FPS window — don't wait for next frame
+          if (g_fps) ShowWindow(g_fps, g_fpsVisible ? SW_SHOWNOACTIVATE : SW_HIDE);
+        }
         else if (i == 2) { g_screenshot = true; }
         else { // Settings toggle
           if (IsWindowVisible(g_settings)) ShowWindow(g_settings, SW_HIDE);
           else { SetWindowTextW(g_pathEdit, g_shotPath.c_str()); ShowWindow(g_settings, SW_SHOWNOACTIVATE); }
         }
         InvalidateRect(h, nullptr, FALSE);
+        UpdateWindow(h);  // force immediate repaint so button state updates NOW
         return 0;
       }
     }
@@ -407,6 +436,13 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     paintSettings(h, dc);
     EndPaint(h, &ps); return 0;
   }
+  if (m == WM_NCHITTEST) {
+    // Allow dragging by the title bar area (top 48px)
+    POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+    ScreenToClient(h, &p);
+    if (p.y < 48) return HTCAPTION;
+    return HTCLIENT;
+  }
   if (m == WM_COMMAND) {
     if (LOWORD(w) >= 101 && LOWORD(w) <= 105) {
       if (LOWORD(w) == 101) g_cfg.fps = (IsDlgButtonChecked(h, 101) == BST_CHECKED);
@@ -415,17 +451,63 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       if (LOWORD(w) == 104) g_cfg.resolution = (IsDlgButtonChecked(h, 104) == BST_CHECKED);
       if (LOWORD(w) == 105) g_cfg.background = (IsDlgButtonChecked(h, 105) == BST_CHECKED);
       saveCfg();
-      if (g_fps) InvalidateRect(g_fps, nullptr, FALSE);
+      // Update FPS window alpha + repaint
+      if (g_fps) {
+        int alpha = g_cfg.background ? (int)(g_cfg.background_alpha * 255) : 0;
+        if (!g_cfg.background) alpha = 255; // no background = fully opaque text
+        else alpha = std::max(180, alpha); // keep text readable
+        SetLayeredWindowAttributes(g_fps, 0, alpha, LWA_ALPHA);
+        InvalidateRect(g_fps, nullptr, FALSE);
+      }
     }
-    if (HIWORD(w) == EN_CHANGE && LOWORD(w) == 201) {
+    // Color picker buttons
+    if (LOWORD(w) >= 401 && LOWORD(w) <= 403) {
+      static COLORREF cust[16] = {};
+      CHOOSECOLORW cc{}; cc.lStructSize = sizeof(cc);
+      cc.hwndOwner = h; cc.lpCustColors = cust;
+      cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+      COLORREF* target = nullptr;
+      if (LOWORD(w) == 401) { cc.rgbResult = g_cfg.engine_color; target = &g_cfg.engine_color; }
+      if (LOWORD(w) == 402) { cc.rgbResult = g_cfg.text_color; target = &g_cfg.text_color; }
+      if (LOWORD(w) == 403) { cc.rgbResult = g_cfg.frametime_color; target = &g_cfg.frametime_color; }
+      if (target && ChooseColorW(&cc)) {
+        *target = cc.rgbResult;
+        saveCfg();
+        if (g_fps) InvalidateRect(g_fps, nullptr, FALSE);
+      }
+    }
+    if (HIWORD(w) == EN_CHANGE && LOWORD(w) == 203) {
       wchar_t p[MAX_PATH * 4]{}; GetWindowTextW(g_pathEdit, p, MAX_PATH * 4);
       g_shotPath = p; saveCfg(); return 0;
     }
-    if (LOWORD(w) == 202) {
+    if (LOWORD(w) == 204) {
       wchar_t p[MAX_PATH * 4]{}; BROWSEINFOW bi{};
       bi.hwndOwner = h; bi.lpszTitle = L"Choose screenshot folder";
       LPITEMIDLIST id = SHBrowseForFolderW(&bi);
       if (id) { SHGetPathFromIDListW(id, p); CoTaskMemFree(id); if (p[0]) { g_shotPath = p; saveCfg(); SetWindowTextW(g_pathEdit, g_shotPath.c_str()); } }
+    }
+  }
+  if (m == WM_HSCROLL) {
+    HWND ctrl = (HWND)l;
+    if (ctrl == GetDlgItem(h, 201)) {
+      g_cfg.fontSize = (int)SendMessageW(ctrl, TBM_GETPOS, 0, 0);
+      wchar_t b[8]; swprintf_s(b, L"%d", g_cfg.fontSize);
+      SetWindowTextW(GetDlgItem(h, 301), b);
+      saveCfg();
+      if (g_fps) InvalidateRect(g_fps, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 202)) {
+      int val = (int)SendMessageW(ctrl, TBM_GETPOS, 0, 0);
+      g_cfg.background_alpha = (float)val / 100.0f;
+      wchar_t b[8]; swprintf_s(b, L"%d%%", val);
+      SetWindowTextW(GetDlgItem(h, 302), b);
+      saveCfg();
+      // Apply alpha to the FPS window immediately
+      if (g_fps) {
+        int alpha = g_cfg.background ? (int)(g_cfg.background_alpha * 255) : 255;
+        if (g_cfg.background) alpha = std::max(180, alpha);
+        SetLayeredWindowAttributes(g_fps, 0, alpha, LWA_ALPHA);
+        InvalidateRect(g_fps, nullptr, FALSE);
+      }
     }
   }
   return DefWindowProcW(h, m, w, l);
@@ -462,27 +544,53 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   g_ui = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, UI_CLS, L"",
     WS_POPUP, 0, 0, barW, BAR_PAD * 2 + BTN_SIZE, nullptr, nullptr, inst, nullptr);
 
-  // FPS overlay (top-level popup — NOT a child of g_output because DWM
-  // doesn't render child windows of WS_EX_LAYERED parents.  Top-level
-  // popup with WS_EX_TOPMOST stays above everything.)
-  g_fps = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+  // FPS overlay (layered top-level popup with per-window alpha for background)
+  g_fps = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
     FPS_CLS, L"", WS_POPUP, 0, 0, FPS_W, 100, nullptr, nullptr, inst, nullptr);
+  if (g_fps) SetLayeredWindowAttributes(g_fps, 0, 255, LWA_ALPHA);
 
-  // Settings panel (separate top-level popup, same reason as top bar)
-  g_settings = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, SET_CLS, L"",
-    WS_POPUP, 300, 80, 520, 400, nullptr, nullptr, inst, nullptr);
+  // Settings panel — centered on screen, draggable
+  {
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+    int setW = 480, setH = 460;
+    g_settings = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, SET_CLS, L"",
+      WS_POPUP, (sw - setW) / 2, (sh - setH) / 2, setW, setH, nullptr, nullptr, inst, nullptr);
+  }
   if (g_settings) {
-    // FPS overlay checkboxes
-    CreateWindowW(L"BUTTON", L"FPS", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 24, 90, 100, 26, g_settings, (HMENU)101, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"Frametime", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 130, 90, 120, 26, g_settings, (HMENU)102, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"Graph", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 260, 90, 100, 26, g_settings, (HMENU)103, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"Resolution", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 370, 90, 120, 26, g_settings, (HMENU)104, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"Background", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 24, 124, 120, 26, g_settings, (HMENU)105, inst, nullptr);
+    // FPS OVERLAY section: checkboxes
+    CreateWindowW(L"BUTTON", L"FPS", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 24, 84, 80, 22, g_settings, (HMENU)101, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"Frametime", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 110, 84, 100, 22, g_settings, (HMENU)102, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"Graph", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 216, 84, 80, 22, g_settings, (HMENU)103, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"Resolution", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 302, 84, 100, 22, g_settings, (HMENU)104, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"Background", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 24, 112, 100, 22, g_settings, (HMENU)105, inst, nullptr);
 
-    // Screenshot path
+    // APPEARANCE section
+    CreateWindowW(L"STATIC", L"Font size:", WS_CHILD | WS_VISIBLE | SS_LEFT, 24, 196, 70, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"24", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTER, 410, 196, 30, 18, g_settings, (HMENU)301, inst, nullptr);
+    CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD | WS_VISIBLE | TBS_NOTICKS | TBS_AUTOTICKS, 100, 192, 300, 26, g_settings, (HMENU)201, inst, nullptr);
+    SendMessageW(GetDlgItem(g_settings, 201), TBM_SETRANGE, TRUE, MAKELONG(12, 48));
+    SendMessageW(GetDlgItem(g_settings, 201), TBM_SETPOS, TRUE, g_cfg.fontSize);
+
+    CreateWindowW(L"STATIC", L"Bg alpha:", WS_CHILD | WS_VISIBLE | SS_LEFT, 24, 228, 70, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"50%", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTER, 410, 228, 30, 18, g_settings, (HMENU)302, inst, nullptr);
+    CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD | WS_VISIBLE | TBS_NOTICKS | TBS_AUTOTICKS, 100, 224, 300, 26, g_settings, (HMENU)202, inst, nullptr);
+    SendMessageW(GetDlgItem(g_settings, 202), TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+    SendMessageW(GetDlgItem(g_settings, 202), TBM_SETPOS, TRUE, (int)(g_cfg.background_alpha * 100));
+
+    // Color buttons
+    CreateWindowW(L"STATIC", L"Engine:", WS_CHILD | WS_VISIBLE | SS_LEFT, 24, 260, 50, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 256, 40, 22, g_settings, (HMENU)401, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Text:", WS_CHILD | WS_VISIBLE | SS_LEFT, 130, 260, 40, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 174, 256, 40, 22, g_settings, (HMENU)402, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Graph:", WS_CHILD | WS_VISIBLE | SS_LEFT, 224, 260, 40, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 268, 256, 40, 22, g_settings, (HMENU)403, inst, nullptr);
+
+    // SCREENSHOT section
+    CreateWindowW(L"STATIC", L"Folder:", WS_CHILD | WS_VISIBLE | SS_LEFT, 24, 326, 60, 18, g_settings, nullptr, inst, nullptr);
     g_pathEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_shotPath.c_str(),
-      WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 24, 210, 360, 28, g_settings, (HMENU)201, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE, 394, 210, 82, 28, g_settings, (HMENU)202, inst, nullptr);
+      WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 24, 348, 340, 24, g_settings, (HMENU)203, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE, 374, 348, 80, 24, g_settings, (HMENU)204, inst, nullptr);
 
     // Set checkbox states
     CheckDlgButton(g_settings, 101, g_cfg.fps ? BST_CHECKED : BST_UNCHECKED);
@@ -492,6 +600,13 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     CheckDlgButton(g_settings, 105, g_cfg.background ? BST_CHECKED : BST_UNCHECKED);
 
     ShowWindow(g_settings, SW_HIDE);
+  }
+
+  if (g_fps) {
+    // Apply initial background alpha
+    int alpha = g_cfg.background ? (int)(g_cfg.background_alpha * 255) : 255;
+    if (g_cfg.background) alpha = std::max(180, alpha);
+    SetLayeredWindowAttributes(g_fps, 0, alpha, LWA_ALPHA);
   }
 
   g_initialized = true;
@@ -515,10 +630,12 @@ void overlaySetOpen(bool open) {
       // Show the top bar first (ShowWindow is more reliable than
       // SetWindowPos SWP_SHOWWINDOW for a window that's never been shown)
       ShowWindow(g_ui, SW_SHOWNOACTIVATE);
-      // Position at top-left of the output window
+      // Position the top bar at top-center of the output window
       RECT o{}; if (GetWindowRect(g_output, &o)) {
         int barW = BAR_PAD * 2 + 4 * BTN_SIZE + 3 * BTN_GAP;
-        SetWindowPos(g_ui, HWND_TOPMOST, o.left + 16, o.top + 16, barW, BAR_PAD * 2 + BTN_SIZE,
+        int screenW = o.right - o.left;
+        int cx = o.left + (screenW - barW) / 2;  // centered
+        SetWindowPos(g_ui, HWND_TOPMOST, cx, o.top + 16, barW, BAR_PAD * 2 + BTN_SIZE,
           SWP_NOACTIVATE | SWP_SHOWWINDOW);
       }
       InvalidateRect(g_ui, nullptr, TRUE);
@@ -560,25 +677,26 @@ void overlayUpdate(float fps, float ms, Size cap, Size out) {
   }
 
   if (g_fps && g_fpsVisible) {
-    // Auto-resize the FPS window to fit content (moved here from paintFps
-    // to avoid calling SetWindowPos during WM_PAINT which caused flicker).
+    // Dynamic width based on font size to prevent clipping
+    int dynW = std::max(FPS_W, g_cfg.fontSize * 10);
+
     int fs = g_cfg.fontSize;
     int smFont = (int)(fs * 0.55);
-    int totalH = 8; // pad
+    int totalH = 8;
     if (g_cfg.fps) totalH += fs + 6;
     else if (g_cfg.frametime) totalH += smFont + 6;
     if (g_cfg.frame_timing) totalH += smFont + 4 + FT_HEIGHT + 4;
     if (g_cfg.resolution) totalH += smFont + 4;
-    totalH += 8; // bottom pad
+    totalH += 8;
 
     RECT cur{}; GetWindowRect(g_fps, &cur);
-    if ((cur.bottom - cur.top) != totalH || (cur.right - cur.left) != FPS_W) {
+    if ((cur.bottom - cur.top) != totalH || (cur.right - cur.left) != dynW) {
       RECT o{}; GetWindowRect(g_output, &o);
       int x = o.left + 10, yp = o.top + 10;
-      if (g_cfg.position == 1) x = o.right - FPS_W - 10;
+      if (g_cfg.position == 1) x = o.right - dynW - 10;
       if (g_cfg.position == 2) yp = o.bottom - totalH - 10;
-      if (g_cfg.position == 3) { x = o.right - FPS_W - 10; yp = o.bottom - totalH - 10; }
-      SetWindowPos(g_fps, HWND_TOPMOST, x, yp, FPS_W, totalH,
+      if (g_cfg.position == 3) { x = o.right - dynW - 10; yp = o.bottom - totalH - 10; }
+      SetWindowPos(g_fps, HWND_TOPMOST, x, yp, dynW, totalH,
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
     InvalidateRect(g_fps, nullptr, FALSE);

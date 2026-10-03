@@ -234,9 +234,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
       drawCursor();
 
-      // Update the overlay FPS meter every frame, even if no new capture
-      // frame arrived (e.g. game paused on focus loss).  Uses the last
-      // known fps/ms values so the FPS counter doesn't freeze.
+      // Take screenshot if requested — do this BEFORE cap.acquire so it
+      // works even when no new frame arrived.  Uses the last captured
+      // texture which persists between frames.
+      if (overlayConsumeScreenshot()) cap.saveScreenshot(overlayScreenshotPath(), cap.totalFrames());
+
+      // Single QPC per frame — measures full frame time (previous-top to
+      // current-top).  Both the FPS overlay and the FSR dt use this value.
+      // The previous code had a second QPC after cap.acquire which measured
+      // only the render portion, making the displayed FPS incorrect.
       {
         QueryPerformanceCounter(&now);
         float ms = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
@@ -272,16 +278,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
-      if (overlayConsumeScreenshot()) cap.saveScreenshot(overlayScreenshotPath(), cap.totalFrames());
       lastCs = cs;
       setScaleSizes(cs, display);
       gfx.ensureAuxTextures(cs);
 
-      QueryPerformanceCounter(&now);
-      float ms = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
-      last = now;
-      float dt = std::clamp(ms, 1.0f, 100.0f);
-      fps = (ms > 0.001f) ? (1000.0f / ms) : 0.0f;
+      // dt for FSR — use the frame ms from the top-of-loop QPC (stored in fps)
+      float dt = std::clamp(1000.0f / (fps > 0.001f ? fps : 60.0f), 1.0f, 100.0f);
 
       gfx.begin();
       auto* cmd = gfx.cmd();
