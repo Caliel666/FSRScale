@@ -8,7 +8,7 @@
 
 static const wchar_t* UI_CLS=L"NRLiveOverlayUI";
 static const wchar_t* FPS_CLS=L"NRLiveMangoHud";
-static HWND g_output=nullptr,g_ui=nullptr,g_settings=nullptr,g_fps=nullptr;
+static HWND g_output=nullptr,g_ui=nullptr,g_settings=nullptr,g_fps=nullptr,g_pathEdit=nullptr;
 static bool g_open=false,g_fsr=true,g_fpsVisible=true,g_initialized=false;
 static bool g_toggleFsr=false,g_screenshot=false;
 static OverlayHudConfig g_cfg{};
@@ -57,6 +57,27 @@ static void paintUI(HWND h,HDC dc){
   const int s=56,g=10,left=16,top=12;
   for(int i=0;i<4;i++){RECT b{left+i*(s+g),top,left+i*(s+g)+s,top+s};HBRUSH br=CreateSolidBrush(i==3&&g_settings?RGB(55,28,31):RGB(38,40,48));rr(dc,b,10,br);DeleteObject(br);icon(dc,b,i,(i==0&&g_fsr)||(i==1&&g_fpsVisible)||(i==3&&g_settings));}
 }
+static void paintSettings(HWND h,HDC dc){
+  RECT rc{};GetClientRect(h,&rc);HBRUSH bg=CreateSolidBrush(RGB(28,29,36));FillRect(dc,&rc,bg);DeleteObject(bg);
+  text(dc,L"NRLive Settings",RECT{24,18,rc.right-24,54},24,RGB(245,245,248),DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+  text(dc,L"FPS overlay",RECT{24,72,240,104},16,RGB(225,225,230),DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+  text(dc,L"Display",RECT{24,116,240,144},14,RGB(170,170,180),DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+  text(dc,L"Screenshot folder",RECT{24,204,240,232},14,RGB(170,170,180),DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+  text(dc,L"MangoHud-style metrics and positioning are stored in scaleconfig.ini.",RECT{24,280,rc.right-24,320},12,RGB(135,135,145),DT_LEFT|DT_TOP|DT_WORDBREAK);
+}
+static LRESULT CALLBACK settingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
+  if(m==WM_PAINT){PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);paintSettings(h,dc);EndPaint(h,&ps);return 0;}
+  if(m==WM_COMMAND){
+    if(LOWORD(w)==101){g_cfg.fps=IsDlgButtonChecked(h,101)==BST_CHECKED;saveCfg();InvalidateRect(g_fps,nullptr,FALSE);}
+    if(LOWORD(w)==102){g_cfg.frametime=IsDlgButtonChecked(h,102)==BST_CHECKED;saveCfg();}
+    if(LOWORD(w)==103){g_cfg.resolution=IsDlgButtonChecked(h,103)==BST_CHECKED;saveCfg();}
+    if(LOWORD(w)==105){
+      wchar_t p[MAX_PATH*4]{};BROWSEINFOW bi{};bi.hwndOwner=h;bi.lpszTitle=L"Choose screenshot folder";LPITEMIDLIST id=SHBrowseForFolderW(&bi);
+      if(id){SHGetPathFromIDListW(id,p);CoTaskMemFree(id);if(p[0]){g_shotPath=p;saveCfg();}}
+    }
+  }
+  return DefWindowProcW(h,m,w,l);
+}
 static LRESULT CALLBACK uiProc(HWND h,UINT m,WPARAM w,LPARAM l){
   if(m==WM_PAINT){PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);paintUI(h,dc);EndPaint(h,&ps);return 0;}
   if(m==WM_LBUTTONUP){POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)};const int s=56,g=10,left=16;
@@ -64,7 +85,7 @@ static LRESULT CALLBACK uiProc(HWND h,UINT m,WPARAM w,LPARAM l){
       if(i==0){g_fsr=!g_fsr;g_toggleFsr=true;}
       else if(i==1){g_fpsVisible=!g_fpsVisible;saveCfg();}
       else if(i==2){g_screenshot=true;}
-      else ShowWindow(g_settings,IsWindowVisible(g_settings)?SW_HIDE:SW_SHOW);
+      else { if(g_settings){ if(IsWindowVisible(g_settings)){ ShowWindow(g_settings,SW_HIDE); } else { if(g_pathEdit) SetWindowTextW(g_pathEdit,g_shotPath.c_str()); ShowWindow(g_settings,SW_SHOWNOACTIVATE); InvalidateRect(g_settings,nullptr,FALSE); } } }
       InvalidateRect(h,nullptr,FALSE); return 0;}}
   } return DefWindowProcW(h,m,w,l);
 }
@@ -86,6 +107,20 @@ bool overlayInit(HINSTANCE inst,HWND output){
   WNDCLASSEXW f{sizeof(f)};f.hInstance=inst;f.lpfnWndProc=fpsProc;f.lpszClassName=FPS_CLS;f.hCursor=nullptr;f.hbrBackground=nullptr;RegisterClassExW(&f);
   g_ui=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,UI_CLS,L"",WS_CHILD,0,0,292,80,output,nullptr,inst,nullptr);
   g_fps=CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST,FPS_CLS,L"",WS_POPUP,0,0,190,100,nullptr,nullptr,inst,nullptr);
+  if(g_fps) SetLayeredWindowAttributes(g_fps,0,255,LWA_ALPHA);
+  WNDCLASSEXW sc{sizeof(sc)};sc.hInstance=inst;sc.lpfnWndProc=settingsProc;sc.lpszClassName=L"NRLiveSettings";sc.hCursor=LoadCursor(nullptr,IDC_ARROW);sc.hbrBackground=nullptr;RegisterClassExW(&sc);
+  g_settings=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"NRLiveSettings",L"",WS_CHILD,320,90,520,350,output,nullptr,inst,nullptr);
+  if(g_settings){
+    CreateWindowW(L"BUTTON",L"FPS",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,24,92,100,26,g_settings,(HMENU)101,inst,nullptr);
+    CreateWindowW(L"BUTTON",L"Frametime",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,130,92,120,26,g_settings,(HMENU)102,inst,nullptr);
+    CreateWindowW(L"BUTTON",L"Resolution",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,260,92,120,26,g_settings,(HMENU)103,inst,nullptr);
+    g_pathEdit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",g_shotPath.c_str(),WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,24,150,380,28,g_settings,nullptr,inst,nullptr);
+    CreateWindowW(L"BUTTON",L"Browse...",WS_CHILD|WS_VISIBLE,414,150,82,28,g_settings,(HMENU)105,inst,nullptr);
+    CheckDlgButton(g_settings,101,g_cfg.fps?BST_CHECKED:BST_UNCHECKED);
+    CheckDlgButton(g_settings,102,g_cfg.frametime?BST_CHECKED:BST_UNCHECKED);
+    CheckDlgButton(g_settings,103,g_cfg.resolution?BST_CHECKED:BST_UNCHECKED);
+    ShowWindow(g_settings,SW_HIDE);
+  }
   g_initialized=true;updateFpsPos();return true;
 }
 void overlayShutdown(){saveCfg();if(g_fps)DestroyWindow(g_fps);if(g_ui)DestroyWindow(g_ui);g_fps=g_ui=nullptr;g_initialized=false;}
