@@ -172,7 +172,8 @@ bool FastMv::ensureResources(Size rs){
   return tex(m_currLuma,flow.w,flow.h,DXGI_FORMAT_R16_FLOAT,D3D12_RESOURCE_STATE_UNORDERED_ACCESS) &&
          tex(m_prevLuma,flow.w,flow.h,DXGI_FORMAT_R16_FLOAT,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) &&
          tex(m_coarse,flow.w,flow.h,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_STATE_UNORDERED_ACCESS) &&
-         tex(m_refined,flow.w,flow.h,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+         tex(m_refined,flow.w,flow.h,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_STATE_UNORDERED_ACCESS) &&
+         tex(m_dummyGuess,flow.w,flow.h,DXGI_FORMAT_R16G16_FLOAT,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 void FastMv::createViews(ID3D12Resource* color,ID3D12Resource* full){
@@ -184,7 +185,7 @@ void FastMv::createViews(ID3D12Resource* color,ID3D12Resource* full){
 
   s.Format=DXGI_FORMAT_B8G8R8A8_UNORM;m_device->CreateShaderResourceView(color,&s,at(0));
   s.Format=DXGI_FORMAT_R16_FLOAT;m_device->CreateShaderResourceView(m_prevLuma.Get(),&s,at(1));
-  s.Format=DXGI_FORMAT_R16G16_FLOAT;m_device->CreateShaderResourceView(m_coarse.Get(),&s,at(2));
+  s.Format=DXGI_FORMAT_R16G16_FLOAT;m_device->CreateShaderResourceView(m_dummyGuess.Get(),&s,at(2));
   D3D12_UNORDERED_ACCESS_VIEW_DESC u{};
   u.ViewDimension=D3D12_UAV_DIMENSION_TEXTURE2D;u.Format=DXGI_FORMAT_R16_FLOAT;
   m_device->CreateUnorderedAccessView(m_currLuma.Get(),nullptr,&u,at(3));
@@ -233,6 +234,17 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,ID3D12Resource* color,
 
     transition(cmd,m_coarse.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     transition(cmd,m_refined.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    // Refinement reads the coarse field through t2. The first pass keeps t2
+    // bound to a read-only dummy so it never aliases the UAV it is writing.
+    auto cpu2=m_heap->GetCPUDescriptorHandleForHeapStart(); cpu2.ptr+=2ull*m_stride;
+    D3D12_SHADER_RESOURCE_VIEW_DESC coarseSrv{};
+    coarseSrv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    coarseSrv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;
+    coarseSrv.Format=DXGI_FORMAT_R16G16_FLOAT;
+    coarseSrv.Texture2D.MipLevels=1;
+    m_device->CreateShaderResourceView(m_coarse.Get(),&coarseSrv,cpu2);
+
     cb[4]=1; cb[5]=0.0f; cb[6]=0.0f; cb[7]=1;
     cmd->SetPipelineState(m_refinePso.Get()); setTable(cmd,gpu,m_stride,0);
     cmd->SetComputeRoot32BitConstants(1,8,cb,0);
@@ -274,6 +286,6 @@ void FastMv::clearOutput(ID3D12GraphicsCommandList* cmd,ID3D12Resource* full){
 }
 
 void FastMv::shutdown(){
-  m_ready=false;m_hasHistory=false;m_currLuma.Reset();m_prevLuma.Reset();m_coarse.Reset();m_refined.Reset();
+  m_ready=false;m_hasHistory=false;m_currLuma.Reset();m_prevLuma.Reset();m_coarse.Reset();m_refined.Reset();m_dummyGuess.Reset();
   m_cb.Reset();m_lumaPso.Reset();m_flowPso.Reset();m_refinePso.Reset();m_upPso.Reset();m_rs.Reset();m_heap.Reset();
 }
