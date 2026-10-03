@@ -1,10 +1,47 @@
 #include "ui.h"
 #include <windowsx.h>
 #include <algorithm>
-#include <vector>
 
 static const wchar_t* OUT_CLS = L"FSRScaleOutput";
 static const wchar_t* HUD_CLS = L"FSRScaleHud";
+static const wchar_t* CURSOR_CLS = L"FSRScaleCursor";
+static HWND g_hudOwner = nullptr;
+
+static UINT g_bypassVks[32]{};
+static size_t g_bypassCount = 0;
+
+void setBindBypassVks(const UINT* vks, size_t count)
+{
+  g_bypassCount = 0;
+  if (!vks || !count) return;
+  if (count > 32) count = 32;
+  for (size_t i = 0; i < count; ++i)
+    g_bypassVks[g_bypassCount++] = vks[i];
+}
+
+static bool isBypassVk(UINT vk)
+{
+  for (size_t i = 0; i < g_bypassCount; ++i)
+    if (g_bypassVks[i] == vk) return true;
+  return false;
+}
+
+static HWND g_target = nullptr;
+static HWND g_output = nullptr;
+static HWND g_overlayHud = nullptr;
+static HudInfo g_hud;
+static Size g_captureSize{};
+static Size g_outputSize{};
+static bool g_overlayOpen = false;
+static LONG_PTR g_savedExStyle = 0;
+
+include "ui.h"
+#include <windowsx.h>
+#include <algorithm>
+
+static const wchar_t* OUT_CLS = L"FSRScaleOutput";
+static const wchar_t* HUD_CLS = L"FSRScaleHud";
+static const wchar_t* CURSOR_CLS = L"FSRScaleCursor";
 static HWND g_hudOwner = nullptr;
 
 static UINT g_bypassVks[32]{};
@@ -111,6 +148,167 @@ static void clipCursorToOutput(bool enable)
   ClipCursor(&screen);
 }
 
+static HWND g_cursorWindow = nullptr;
+static HCURSOR g_drawnCursor = nullptr;
+static int g_cursorW = 32;
+static int g_cursorH = 32;
+static POINT g_cursorHotspot{};
+
+static LRESULT CALLBACK cursorProc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+  if (m == WM_NCHITTEST) return HTTRANSPARENT;
+  if (m == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+  if (m == WM_ERASEBKGND) return 1;
+  return DefWindowProcW(h, m, w, l);
+}
+
+static void createCursorWindow(HINSTANCE inst)
+{
+  if (g_cursorWindow) return;
+  WNDCLASSEXW c{ sizeof(c) };
+  c.hInstance = inst;
+  c.lpfnWndProc = cursorProc;
+  c.lpszClassName = CURSOR_CLS;
+  c.hCursor = nullptr;
+  c.hbrBackground = nullptr;
+  RegisterClassExW(&c);
+
+  g_cursorWindow = CreateWindowExW(
+    WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+    CURSOR_CLS, L"", WS_POPUP,
+    0, 0, g_cursorW, g_cursorH,
+    nullptr, nullptr, inst, nullptr);
+
+  if (g_cursorWindow)
+    ShowWindow(g_cursorWindow, SW_HIDE);
+}
+
+static void hideDrawnCursor()
+{
+  if (g_cursorWindow)
+    ShowWindow(g_cursorWindow, SW_HIDE);
+}
+
+static bool rebuildDrawnCursor(HCURSOR cursor)
+{
+  if (!g_cursorWindow || !cursor) return false;
+
+  ICONINFO ii{};
+  if (!GetIconInfo(cursor, &ii))
+    return false;
+
+  BITMAP bm{};
+  HBITMAP shape = ii.hbmColor ? ii.hbmColor : ii.hbmMask;
+  if (!shape || !GetObjectW(shape, sizeof(bm), &bm)) {
+    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    return false;
+  }
+
+  int w = bm.bmWidth;
+  int h = bm.bmHeight;
+  if (!ii.hbmColor) h /= 2;
+  w = std::max(1, std::min(w, 256));
+  h = std::max(1, std::min(h, 256));
+
+  g_cursorW = w;
+  g_cursorH = h;
+  g_cursorHotspot.x = (LONG)ii.xHotspot;
+  g_cursorHotspot.y = (LONG)ii.yHotspot;
+
+  HDC screen = GetDC(nullptr);
+  HDC mem = CreateCompatibleDC(screen);
+  BITMAPINFO bi{};
+  bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bi.bmiHeader.biWidth = w;
+  bi.bmiHeader.biHeight = -h;
+  bi.bmiHeader.biPlanes = 1;
+  bi.bmiHeader.biBitCount = 32;
+  bi.bmiHeader.biCompression = BI_RGB;
+
+  void* bits = nullptr;
+  HBITMAP dib = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+  if (!mem || !dib || !bits) {
+    if (dib) DeleteObject(dib);
+    if (mem) DeleteDC(mem);
+    if (screen) ReleaseDC(nullptr, screen);
+    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    return false;
+  }
+
+  SelectObject(mem, dib);
+  memset(bits, 0, (size_t)w * (size_t)h * 4);
+
+  DrawIconEx(mem, 0, 0, cursor, w, h, 0, nullptr, DI_NORMAL);
+
+  POINT dst{};
+  SIZE size{ w, h };
+  POINT src{};
+  BLENDFUNCTION blend{};
+  blend.BlendOp = AC_SRC_OVER;
+  blend.SourceConstantAlpha = 255;
+  blend.AlphaFormat = AC_SRC_ALPHA;
+
+  BOOL ok = UpdateLayeredWindow(
+    g_cursorWindow, screen, &dst, &size, mem, &src, 0, &blend, ULW_ALPHA);
+
+  DeleteObject(dib);
+  DeleteDC(mem);
+  ReleaseDC(nullptr, screen);
+  if (ii.hbmColor) DeleteObject(ii.hbmColor);
+  if (ii.hbmMask) DeleteObject(ii.hbmMask);
+
+  if (!ok) return false;
+  g_drawnCursor = cursor;
+  return true;
+}
+
+static void drawCursor()
+{
+  HWND h = g_output;
+  if (!h || !IsWindow(h)) return;
+
+  // The real cursor must always be confined to the presentation surface in
+  // both game mode and overlay mode. Games can call ClipCursor themselves,
+  // so repeat this every frame just like Magpie's 3D-game path.
+  clipCursorToOutput(true);
+
+  // Overlay mode owns the real cursor. Do not put a second cursor on top of it.
+  if (g_overlayOpen) {
+    hideDrawnCursor();
+    return;
+  }
+
+  CURSORINFO ci{};
+  ci.cbSize = sizeof(ci);
+  if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
+    hideDrawnCursor();
+    return;
+  }
+
+  if (ci.hCursor != g_drawnCursor && !rebuildDrawnCursor(ci.hCursor)) {
+    hideDrawnCursor();
+    return;
+  }
+
+  RECT out{};
+  if (!GetWindowRect(h, &out)) {
+    hideDrawnCursor();
+    return;
+  }
+
+  // The output is a fullscreen presentation surface. Keep the cursor in
+  // physical screen coordinates so it stays pixel-accurate instead of being
+  // scaled with the game image.
+  const int x = ci.ptScreenPos.x - (int)g_cursorHotspot.x;
+  const int y = ci.ptScreenPos.y - (int)g_cursorHotspot.y;
+
+  SetWindowPos(g_cursorWindow, HWND_TOPMOST,
+               x, y, g_cursorW, g_cursorH,
+               SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
 static void applyOverlayActivation(bool open)
 {
   HWND h = g_output;
@@ -203,10 +401,6 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
     if (g_overlayOpen) return MA_ACTIVATE;
     return MA_NOACTIVATE;
   case WM_INPUT:
-    if (!g_overlayOpen) {
-      handleRawMouse((HRAWINPUT)l);
-      return 0;
-    }
     return DefWindowProcW(h, m, w, l);
   case WM_MOUSEMOVE:
   case WM_LBUTTONDOWN: case WM_LBUTTONUP:
@@ -247,8 +441,9 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
     return 0;
   case WM_DESTROY:
     if (GetCapture() == h) ReleaseCapture();
-    unregisterRawMouse();
     ClipCursor(nullptr);
+    hideDrawnCursor();
+    if (g_cursorWindow) { DestroyWindow(g_cursorWindow); g_cursorWindow = nullptr; }
     PostQuitMessage(0);
     return 0;
   default:
@@ -297,7 +492,7 @@ HWND createOutput(HINSTANCE i, int w, int h)
     WS_POPUP, 0, 0, w, h, nullptr, nullptr, i, nullptr);
   if (hwnd) {
     g_output = hwnd;
-    registerRawMouse(hwnd);
+    createCursorWindow(i);
     // WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Win10 2004+)
     SetWindowDisplayAffinity(hwnd, 0x00000011);
   }
