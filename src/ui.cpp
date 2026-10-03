@@ -365,7 +365,7 @@ void setOutputFullscreen(HWND h, HMONITOR mon)
                mi.rcMonitor.bottom - mi.rcMonitor.top,
                SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOACTIVATE);
   initializeGameCursor();
-  ClipCursor(nullptr);
+  clipCursorToOutput(true);
 }
 
 void setOutputWindowed(HWND h, int w, int t)
