@@ -227,6 +227,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
+      drawCursor();
       if (stopHotkeyDown(spec.stopHotkeyModifiers, spec.stopHotkeyVk)) {
         if (!stopLatched) { running = false; break; }
         stopLatched = true;
