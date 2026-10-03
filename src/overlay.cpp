@@ -23,8 +23,8 @@ static void loadCfg(){
   g_cfg.frametime=GetPrivateProfileIntW(L"FPS",L"frametime",1,iniPath().c_str())!=0;
   g_cfg.resolution=GetPrivateProfileIntW(L"FPS",L"resolution",1,iniPath().c_str())!=0;
   g_cfg.background=GetPrivateProfileIntW(L"FPS",L"background",1,iniPath().c_str())!=0;
-  g_cfg.fontSize=std::clamp(GetPrivateProfileIntW(L"FPS",L"font_size",24,iniPath().c_str()),12,48);
-  g_cfg.position=std::clamp(GetPrivateProfileIntW(L"FPS",L"position",0,iniPath().c_str()),0,3);
+  g_cfg.fontSize=(int)std::clamp<int>(GetPrivateProfileIntW(L"FPS",L"font_size",24,iniPath().c_str()),12,48);
+  g_cfg.position=(int)std::clamp<int>(GetPrivateProfileIntW(L"FPS",L"position",0,iniPath().c_str()),0,3);
   wchar_t path[MAX_PATH*4]{}; GetPrivateProfileStringW(L"General",L"screenshot_path",L"",path,MAX_PATH*4,iniPath().c_str());
   if(path[0]) g_shotPath=path; else { SHGetFolderPathW(nullptr,CSIDL_MYPICTURES,nullptr,SHGFP_TYPE_CURRENT,path); g_shotPath=path; if(!g_shotPath.empty()&&g_shotPath.back()!=L'\\')g_shotPath+=L'\\'; g_shotPath+=L"NRLive"; }
 }
@@ -99,6 +99,17 @@ static void paintFps(HDC dc){
 static void updateFpsPos(){
   if(!g_fps||!IsWindow(g_fps)||!g_output)return;RECT o{};GetWindowRect(g_output,&o);int w=190,h=(g_cfg.fps?g_cfg.fontSize+16:0)+(g_cfg.frametime?24:0)+(g_cfg.resolution?24:0)+24;int x=o.left+16,y=o.top+16;
   if(g_cfg.position==1)x=o.right-w-16; if(g_cfg.position==2)y=o.bottom-h-16; if(g_cfg.position==3){x=o.right-w-16;y=o.bottom-h-16;}
+  SetWindowPos(g_fps,HWND_TOPMOST,x,y,w,h,SWP_NOACTIVATE|(g_fpsVisible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));
+}
+static void updateFpsPos(){
+  if(!g_fps||!IsWindow(g_fps)||!g_output)return;
+  RECT o{}; GetWindowRect(g_output,&o);
+  int w=190;
+  int h=24+(g_cfg.fps?(g_cfg.fontSize+12):0)+(g_cfg.frametime?24:0)+(g_cfg.resolution?24:0);
+  int x=o.left+16,y=o.top+16;
+  if(g_cfg.position==1)x=o.right-w-16;
+  if(g_cfg.position==2)y=o.bottom-h-16;
+  if(g_cfg.position==3){x=o.right-w-16;y=o.bottom-h-16;}
   SetWindowPos(g_fps,HWND_TOPMOST,x,y,w,h,SWP_NOACTIVATE|(g_fpsVisible?SWP_SHOWWINDOW:SWP_HIDEWINDOW));
 }
 static LRESULT CALLBACK fpsProc(HWND h,UINT m,WPARAM w,LPARAM l){if(m==WM_PAINT){PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);paintFps(dc);EndPaint(h,&ps);return 0;}if(m==WM_NCHITTEST)return HTTRANSPARENT;return DefWindowProcW(h,m,w,l);}
