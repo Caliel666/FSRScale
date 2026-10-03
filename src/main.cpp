@@ -4,6 +4,7 @@
 #include "amdof.h"
 #include "fastmv.h"
 #include "ui.h"
+#include "overlay.h"
 #include "target.h"
 #include <windows.h>
 #include <shellapi.h>
@@ -200,9 +201,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         fastmv.init(gfx.device(), render);
     }
 
-    HWND hud = spec.noOverlay ? nullptr : createHud(inst, out);
-    setOverlayHud(hud);
-    setOverlayOpen(false); // Steam-style: hidden until overlay key
+    overlayInit(inst, out);
+    setOverlayHud(nullptr);
+    setOverlayOpen(false);
     setStatus(out, label.c_str());
 
     bool reset = true, running = true;
@@ -227,6 +228,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
+      if (overlayConsumeFsrToggle()) fsrOk = !fsrOk;
       drawCursor();
 
       // If the target (game) window is gone, quit.  This happens when the
@@ -254,6 +256,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
+      if (overlayConsumeScreenshot()) cap.saveScreenshot(L"", cap.totalFrames());
       setScaleSizes(cs, display);
       gfx.ensureAuxTextures(cs);
 
@@ -396,7 +399,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       hi.status = L"frames=" + std::to_wstring(cap.totalFrames()) +
                   (usedFsr ? L" FSR" : L" blit") +
                   L" | mv=" + spec.motionModeText + L" | " + spec.stopHotkeyText + L"=quit | " + spec.overlayHotkeyText + L"=overlay | bypass=" + (spec.bindBypassText.empty() ? std::wstring(L"default") : spec.bindBypassText);
-      updateHud(hud, hi);
+      overlayUpdate(fps, ms, cs, display);
+      updateHud(nullptr, hi);
     }
 
     // IMPORTANT: drain the GPU before tearing down any D3D12 resources.
@@ -409,6 +413,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     fastmv.shutdown();
     amdof.shutdown();
     fsr.shutdown();
+    overlayShutdown();
     cap.stop();
     if (hk) UnregisterHotKey(nullptr, kStopId);
   } catch (const std::exception& e) {
