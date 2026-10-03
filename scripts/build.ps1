@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $FfxSdk)) {
 }
 
 $root = Split-Path -Parent $PSScriptRoot
-Write-Host "FSRScale root : $root"
+Write-Host "NRLive root : $root"
 Write-Host "FFX SDK       : $FfxSdk"
 Write-Host ""
 
@@ -37,6 +37,6 @@ cmake --build "$root\build" --config Release
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "Built: $root\build\Release\FSRScale.exe"
+Write-Host "Built: $root\build\Release\NRLive.exe"
 Write-Host "Ensure amd_fidelityfx_dx12.dll is beside the EXE (POST_BUILD copies it when found)."
 Write-Host "If using OptiScaler, copy its dxgi.dll and OptiScaler.ini beside the EXE."

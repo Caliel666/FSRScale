@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(FSRScale LANGUAGES CXX)
+project(NRLive LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -114,13 +114,13 @@ foreach(_dir ${_FFX_LIB_CANDIDATES})
   endif()
 endforeach()
 if(NOT _FFX_DLL)
-  message(WARNING "amd_fidelityfx_dx12.dll not found; copy it beside FSRScale.exe manually.")
+  message(WARNING "amd_fidelityfx_dx12.dll not found; copy it beside NRLive.exe manually.")
 else()
   message(STATUS "FFX_DLL = ${_FFX_DLL}")
 endif()
 
 # ---------------------------------------------------------------------------
-add_executable(FSRScale WIN32
+add_executable(NRLive WIN32
   src/main.cpp
   src/graphics.cpp
   src/capture.cpp
@@ -131,27 +131,27 @@ add_executable(FSRScale WIN32
   src/target.cpp
 )
 
-target_include_directories(FSRScale PRIVATE
+target_include_directories(NRLive PRIVATE
   "${FFX_INCLUDE}"
   "${CMAKE_SOURCE_DIR}/include"
 )
 
-target_compile_definitions(FSRScale PRIVATE
+target_compile_definitions(NRLive PRIVATE
   UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
 )
 
-target_link_libraries(FSRScale PRIVATE
+target_link_libraries(NRLive PRIVATE
   d3d11 d3d12 dxgi dxguid windowsapp shcore d3dcompiler dwmapi gdi32
 )
 
-set_target_properties(FSRScale PROPERTIES
-  VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:FSRScale>"
+set_target_properties(NRLive PROPERTIES
+  VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:NRLive>"
 )
 
 if(_FFX_DLL)
-  add_custom_command(TARGET FSRScale POST_BUILD
+  add_custom_command(TARGET NRLive POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${_FFX_DLL}"
-      "$<TARGET_FILE_DIR:FSRScale>"
+      "$<TARGET_FILE_DIR:NRLive>"
   )
 endif()

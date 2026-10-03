@@ -31,7 +31,7 @@ struct TargetSpec {
   std::wstring bindBypassText; // human-readable
   bool bindBypassExplicit = false;
 
-  // Steam-style FSRScale overlay toggle (default Ctrl+Home).
+  // Steam-style NRLive overlay toggle (default Ctrl+Home).
   UINT overlayHotkeyModifiers = MOD_CONTROL;
   UINT overlayHotkeyVk = VK_HOME;
   std::wstring overlayHotkeyText = L"Ctrl+Home";

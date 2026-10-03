@@ -210,7 +210,7 @@ bool parseHotkey(const std::wstring& text, UINT& modifiers, UINT& vk)
 // keyboard and mouse control, so they can alt-tab or click the window they
 // want; whatever is in the foreground when the countdown ends is captured.
 
-const wchar_t* PICKER_CLASS = L"FSRScaleTargetPicker";
+const wchar_t* PICKER_CLASS = L"NRLiveTargetPicker";
 
 struct PickerState {
     HWND result = nullptr;
@@ -264,7 +264,7 @@ LRESULT CALLBACK pickerProc(HWND h, UINT msg, WPARAM w, LPARAM lParam)
         SetTextColor(dc, RGB(235, 235, 235));
 
         wchar_t line[160]{};
-        swprintf_s(line, L"FSRScale: capturing in %d s\nBring the window to capture to the front.",
+        swprintf_s(line, L"NRLive: capturing in %d s\nBring the window to capture to the front.",
                    g_picker.secondsLeft);
         DrawTextW(dc, line, -1, &rc, DT_CENTER | DT_VCENTER | DT_WORDBREAK);
 
@@ -335,24 +335,24 @@ HWND resolveFrontWindow()
 std::wstring targetUsage()
 {
     return
-        L"FSRScale - capture and upscale a window with FSR 3\n\n"
-        L"  FSRScale.exe                    picker, 5 s countdown\n"
-        L"  FSRScale.exe -pid <id>          capture the window owned by PID\n"
-        L"  FSRScale.exe -pname <regex>     capture a process whose name matches regex\n"
-        L"  FSRScale.exe -window <regex>    capture a window title matching regex\n"
-        L"  FSRScale.exe -front             continuously follow the foreground window\n"
-        L"  FSRScale.exe -delay <sec>       wait before starting capture\n"
-        L"  FSRScale.exe -nooverlay         disable the FSRScale HUD overlay\n"
-        L"  FSRScale.exe --key ctrl+shift+a set the global stop hotkey\n"
-        L"  FSRScale.exe --mv amdof|fast    select motion-vector implementation\n"
-        L"  FSRScale.exe --bindbypass home,insert,end,pageup,pagedown\n"
+        L"NRLive - capture and upscale a window with FSR 3\n\n"
+        L"  NRLive.exe                    picker, 5 s countdown\n"
+        L"  NRLive.exe -pid <id>          capture the window owned by PID\n"
+        L"  NRLive.exe -pname <regex>     capture a process whose name matches regex\n"
+        L"  NRLive.exe -window <regex>    capture a window title matching regex\n"
+        L"  NRLive.exe -front             continuously follow the foreground window\n"
+        L"  NRLive.exe -delay <sec>       wait before starting capture\n"
+        L"  NRLive.exe -nooverlay         disable the NRLive HUD overlay\n"
+        L"  NRLive.exe --key ctrl+shift+a set the global stop hotkey\n"
+        L"  NRLive.exe --mv amdof|fast    select motion-vector implementation\n"
+        L"  NRLive.exe --bindbypass home,insert,end,pageup,pagedown\n"
         L"                                  OptiScaler/ReShade menu keys (not sent to game).\n"
         L"                                  Default: Home,Insert,End,PageUp,PageDown.\n"
-        L"  FSRScale.exe --overlaykey ctrl+home\n"
-        L"                                  Toggle FSRScale HUD overlay (Steam-style).\n"
+        L"  NRLive.exe --overlaykey ctrl+home\n"
+        L"                                  Toggle NRLive HUD overlay (Steam-style).\n"
         L"                                  Default: Ctrl+Home. When open, mouse is held\n"
-        L"                                  by FSRScale and not forwarded to the game.\n"
-        L"  FSRScale.exe -help              this message\n";
+        L"                                  by NRLive and not forwarded to the game.\n"
+        L"  NRLive.exe -help              this message\n";
 }
 
 

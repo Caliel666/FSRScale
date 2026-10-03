@@ -106,13 +106,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
   const bool cliMode = (argc > 1);
   if (!parsed) {
     if (cliMode && hasConsole()) printCli(err);
-    else MessageBoxW(nullptr, err.c_str(), L"FSRScale", MB_ICONERROR);
+    else MessageBoxW(nullptr, err.c_str(), L"NRLive", MB_ICONERROR);
     return 1;
   }
   if (spec.help) {
     auto u = targetUsage();
     if (cliMode && hasConsole()) printCli(u);
-    else MessageBoxW(nullptr, u.c_str(), L"FSRScale", MB_OK);
+    else MessageBoxW(nullptr, u.c_str(), L"NRLive", MB_OK);
     return 0;
   }
 
@@ -123,7 +123,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
   if (!resolveTargetWindow(spec, inst, target, label)) {
     if (cliMode && hasConsole()) printCli(label);
-    else MessageBoxW(nullptr, label.c_str(), L"FSRScale", MB_ICONERROR);
+    else MessageBoxW(nullptr, label.c_str(), L"NRLive", MB_ICONERROR);
     return 2;
   }
 
@@ -170,7 +170,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     if (!cap.init(gfx.device(), gfx.queue()) || !cap.start(target)) {
       std::wstring msg = L"Capture failed: " + cap.lastError();
       if (cliMode && hasConsole()) printCli(msg);
-      else MessageBoxW(nullptr, msg.c_str(), L"FSRScale", MB_ICONERROR);
+      else MessageBoxW(nullptr, msg.c_str(), L"NRLive", MB_ICONERROR);
       if (hk) UnregisterHotKey(nullptr, kStopId);
       DestroyWindow(out);
       return 3;
@@ -230,7 +230,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       drawCursor();
 
       // If the target (game) window is gone, quit.  This happens when the
-      // game exits — FSRScale should not keep running with a dead target.
+      // game exits — NRLive should not keep running with a dead target.
       if (!target || !IsWindow(target)) {
         running = false;
         break;
@@ -413,10 +413,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     if (hk) UnregisterHotKey(nullptr, kStopId);
   } catch (const std::exception& e) {
     if (hk) UnregisterHotKey(nullptr, kStopId);
-    MessageBoxA(nullptr, e.what(), "FSRScale", MB_ICONERROR);
+    MessageBoxA(nullptr, e.what(), "NRLive", MB_ICONERROR);
   } catch (...) {
     if (hk) UnregisterHotKey(nullptr, kStopId);
-    MessageBoxW(nullptr, L"Fatal graphics error.", L"FSRScale", MB_ICONERROR);
+    MessageBoxW(nullptr, L"Fatal graphics error.", L"NRLive", MB_ICONERROR);
   }
   DestroyWindow(out);
   return 0;

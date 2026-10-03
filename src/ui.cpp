@@ -4,9 +4,9 @@
 #include <cstring>
 #include <cmath>
 
-static const wchar_t* OUT_CLS = L"FSRScaleOutput";
-static const wchar_t* HUD_CLS = L"FSRScaleHud";
-static const wchar_t* CURSOR_CLS = L"FSRScaleCursor";
+static const wchar_t* OUT_CLS = L"NRLiveOutput";
+static const wchar_t* HUD_CLS = L"NRLiveHud";
+static const wchar_t* CURSOR_CLS = L"NRLiveCursor";
 static HWND g_hudOwner = nullptr;
 
 static UINT g_bypassVks[32]{};
@@ -93,7 +93,7 @@ static POINT g_cursorHotspot{};
 
 // ── System cursor visibility ─────────────────────────────────────────────
 // The public ShowCursor() is per-thread — it only affects the cursor when
-// the calling thread's window is in the foreground.  In game mode FSRScale
+// the calling thread's window is in the foreground.  In game mode NRLive
 // has WS_EX_NOACTIVATE so the game owns the foreground, and ShowCursor from
 // our thread has no effect.  We use the undocumented ShowSystemCursor from
 // user32.dll instead — it's system-wide.  Falls back to ShowCursor if the
@@ -260,7 +260,7 @@ void drawCursor()
 
   // Per-frame topmost re-assertion.  Some games call SetWindowPos or
   // SetForegroundWindow on themselves which can push them above
-  // FSRScale even though we are HWND_TOPMOST.  Re-asserting every frame
+  // NRLive even though we are HWND_TOPMOST.  Re-asserting every frame
   // guarantees we stay on top without the user noticing a flicker.
   if (!g_overlayOpen) {
     SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
@@ -268,12 +268,12 @@ void drawCursor()
   }
 
   // In game mode the real cursor must be confined to the TARGET (game)
-  // window's screen rect, not the FSRScale output window.  The game
+  // window's screen rect, not the NRLive output window.  The game
   // window is behind our transparent (WS_EX_TRANSPARENT) presentation
   // surface.  Clipping to the game window ensures the OS routes mouse
   // events to the game — events outside the game window would otherwise
   // hit the desktop.  In overlay mode clip to the output window so the
-  // cursor stays inside the FSRScale presentation for menu interaction.
+  // cursor stays inside the NRLive presentation for menu interaction.
   if (g_overlayOpen)
     clipCursorToOutput(true);
   else
@@ -358,7 +358,7 @@ static void applyOverlayActivation(bool open)
 
   if (open) {
     LONG_PTR style = GetWindowLongPtrW(h, GWL_EXSTYLE);
-    // Overlay mode: REMOVE WS_EX_LAYERED | WS_EX_TRANSPARENT so FSRScale
+    // Overlay mode: REMOVE WS_EX_LAYERED | WS_EX_TRANSPARENT so NRLive
     // receives mouse events for OptiScaler / ReShade menus.
     SetWindowLongPtrW(h, GWL_EXSTYLE,
       style & ~(WS_EX_TRANSPARENT | WS_EX_LAYERED));
@@ -403,7 +403,7 @@ static void applyOverlayActivation(bool open)
 
     // Return focus toward the game FIRST — this lets the game receive
     // keyboard input.  SetForegroundWindow can bring the game window to
-    // the top of the z-order, so we re-assert FSRScale's HWND_TOPMOST
+    // the top of the z-order, so we re-assert NRLive's HWND_TOPMOST
     // AFTER it to guarantee we stay above the game.
     if (g_target && IsWindow(g_target)) {
       AllowSetForegroundWindow(ASFW_ANY);
@@ -411,7 +411,7 @@ static void applyOverlayActivation(bool open)
     }
 
     // Re-assert HWND_TOPMOST AFTER SetForegroundWindow so the game window
-    // cannot end up above FSRScale.  This is the critical ordering fix.
+    // cannot end up above NRLive.  This is the critical ordering fix.
     SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
   }
@@ -551,7 +551,7 @@ HWND createOutput(HINSTANCE i, int w, int h)
   registerClass(OUT_CLS, outProc);
   HWND hwnd = CreateWindowExW(
     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
-    OUT_CLS, L"FSRScale",
+    OUT_CLS, L"NRLive",
     WS_POPUP, 0, 0, w, h, nullptr, nullptr, i, nullptr);
   if (hwnd) {
     g_output = hwnd;
@@ -610,7 +610,7 @@ void updateHud(HWND hud, const HudInfo& info)
   // Always update the cached info (used by WM_PAINT when it does fire).
   g_hud = info;
   if (!hud) return;
-  // Steam-style: HUD only paints while the FSRScale overlay is open.
+  // Steam-style: HUD only paints while the NRLive overlay is open.
   if (!g_overlayOpen) return;
 
   // Throttle HUD repaints to ~5 Hz (200 ms).  The overlay text is informational

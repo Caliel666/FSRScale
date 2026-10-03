@@ -1,6 +1,6 @@
-# FSRScale UI
+# NRLive UI
 
-Lossless Scaling–style launcher for **FSRScale**.
+Lossless Scaling–style launcher for **NRLive**.
 
 ## Quick run (script)
 
@@ -8,7 +8,7 @@ Lossless Scaling–style launcher for **FSRScale**.
 py -3 scale_ui.py
 ```
 
-By default the UI looks for **`FSRScale.exe` in the same folder** as the UI.
+By default the UI looks for **`NRLive.exe` in the same folder** as the UI.
 
 ## Build standalone .exe
 
@@ -19,11 +19,11 @@ By default the UI looks for **`FSRScale.exe` in the same folder** as the UI.
 Creates a venv (`.venv`), installs PyInstaller, and writes:
 
 ```
-build\FSRScaleUI.exe
+build\NRLiveUI.exe
 build\profiles\Default.json
 ```
 
-Copy `FSRScale.exe` next to `build\FSRScaleUI.exe` (or set the path in the UI).
+Copy `NRLive.exe` next to `build\NRLiveUI.exe` (or set the path in the UI).
 
 ## Profiles
 

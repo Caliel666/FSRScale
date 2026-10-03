@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FSRScale launcher UI — Lossless Scaling–inspired dark theme."""
+"""NRLive launcher UI — Lossless Scaling–inspired dark theme."""
 
 from __future__ import annotations
 
@@ -38,9 +38,9 @@ PROFILES_DIR = ROOT / "profiles"
 CONFIG_PATH = ROOT / "ui_config.json"
 
 
-def default_fsrscale_exe() -> str:
-    """FSRScale.exe next to the UI by default."""
-    candidate = ROOT / "FSRScale.exe"
+def default_nrlive_exe() -> str:
+    """NRLive.exe next to the UI by default."""
+    candidate = ROOT / "NRLive.exe"
     return str(candidate)
 
 
@@ -55,7 +55,7 @@ DEFAULT_PROFILE = {
     "stop_key": "ctrl+shift+a",
     "overlay_key": "ctrl+home",
     "bind_bypass": "home,insert,end,pageup,pagedown",
-    "exe_path": "",  # filled at runtime with default_fsrscale_exe()
+    "exe_path": "",  # filled at runtime with default_nrlive_exe()
 }
 
 
@@ -69,7 +69,7 @@ def load_ui_config() -> dict:
             return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {"last_profile": "Default", "exe_path": default_fsrscale_exe()}
+    return {"last_profile": "Default", "exe_path": default_nrlive_exe()}
 
 
 def save_ui_config(cfg: dict) -> None:
@@ -207,10 +207,10 @@ class Card(tk.Frame):
         self.body.pack(fill="both", expand=True, padx=14, pady=(0, 12))
 
 
-class FSRScaleUI(tk.Tk):
+class NRLiveUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("FSRScale")
+        self.title("NRLive")
         self.geometry("980x620")
         self.minsize(860, 520)
         self.configure(bg=BG)
@@ -253,7 +253,7 @@ class FSRScaleUI(tk.Tk):
         top.pack_propagate(False)
         tk.Label(
             top,
-            text="✦  FSRScale",
+            text="✦  NRLive",
             bg=BG,
             fg=ACCENT,
             font=("Segoe UI", 14, "bold"),
@@ -463,12 +463,12 @@ class FSRScaleUI(tk.Tk):
         c = Card(right, "Executable")
         c.pack(fill="x", pady=(0, 12))
         self._vars["exe_path"] = tk.StringVar(
-            value=self.ui_cfg.get("exe_path") or default_fsrscale_exe()
+            value=self.ui_cfg.get("exe_path") or default_nrlive_exe()
         )
         row = tk.Frame(c.body, bg=BG_CARD)
         row.pack(fill="x", pady=3)
         tk.Label(
-            row, text="FSRScale.exe", bg=BG_CARD, fg=TEXT_DIM, width=16, anchor="w",
+            row, text="NRLive.exe", bg=BG_CARD, fg=TEXT_DIM, width=16, anchor="w",
             font=("Segoe UI", 9),
         ).pack(side="left")
         tk.Entry(
@@ -647,10 +647,10 @@ class FSRScaleUI(tk.Tk):
             exe = (
                 data.get("exe_path")
                 or self.ui_cfg.get("exe_path")
-                or default_fsrscale_exe()
+                or default_nrlive_exe()
             )
             if not exe:
-                exe = default_fsrscale_exe()
+                exe = default_nrlive_exe()
             self._vars["exe_path"].set(exe)
         finally:
             self._building = False
@@ -686,7 +686,7 @@ class FSRScaleUI(tk.Tk):
         if self._building:
             return
         data = self._form_data()
-        exe = data.get("exe_path") or "FSRScale.exe"
+        exe = data.get("exe_path") or "NRLive.exe"
         try:
             args = build_cli_args(data, exe)
             text = subprocess.list2cmdline(args) if os.name == "nt" else " ".join(
@@ -781,7 +781,7 @@ class FSRScaleUI(tk.Tk):
 
     def _pick_exe(self):
         path = filedialog.askopenfilename(
-            title="Select FSRScale.exe",
+            title="Select NRLive.exe",
             filetypes=[("Executable", "*.exe"), ("All", "*.*")],
         )
         if path:
@@ -797,7 +797,7 @@ class FSRScaleUI(tk.Tk):
         if not exe or not Path(exe).is_file():
             messagebox.showerror(
                 "Executable",
-                "Set the path to FSRScale.exe (Executable card or Settings).",
+                "Set the path to NRLive.exe (Executable card or Settings).",
             )
             self._pick_exe()
             exe = self._vars["exe_path"].get()
@@ -831,7 +831,7 @@ class FSRScaleUI(tk.Tk):
 
 def main():
     ensure_dirs()
-    app = FSRScaleUI()
+    app = NRLiveUI()
     app.mainloop()
 
 

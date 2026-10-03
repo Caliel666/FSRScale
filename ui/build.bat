@@ -6,7 +6,7 @@ set "VENV=%~dp0.venv"
 set "BUILDDIR=%~dp0build"
 set "DISTDIR=%BUILDDIR%"
 
-echo === FSRScale UI build ===
+echo === NRLive UI build ===
 echo.
 
 where py >nul 2>&1
@@ -39,7 +39,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/4] Building FSRScaleUI.exe ...
+echo [3/4] Building NRLiveUI.exe ...
 if not exist "%BUILDDIR%" mkdir "%BUILDDIR%"
 
 "%VENV%\Scripts\python.exe" -m PyInstaller ^
@@ -47,7 +47,7 @@ if not exist "%BUILDDIR%" mkdir "%BUILDDIR%"
   --clean ^
   --windowed ^
   --onefile ^
-  --name FSRScaleUI ^
+  --name NRLiveUI ^
   --distpath "%DISTDIR%" ^
   --workpath "%BUILDDIR%\work" ^
   --specpath "%BUILDDIR%" ^
@@ -66,9 +66,9 @@ if exist "%~dp0profiles\Default.json" (
 
 echo.
 echo Done.
-echo   Output: %DISTDIR%\FSRScaleUI.exe
+echo   Output: %DISTDIR%\NRLiveUI.exe
 echo.
-echo Place FSRScale.exe in the same folder as FSRScaleUI.exe
+echo Place NRLive.exe in the same folder as NRLiveUI.exe
 echo (default path is that folder), or pick it in the UI.
 echo.
 endlocal
