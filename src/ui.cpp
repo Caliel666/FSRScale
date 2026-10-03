@@ -292,7 +292,7 @@ HWND createOutput(HINSTANCE i, int w, int h)
 {
   registerClass(OUT_CLS, outProc);
   HWND hwnd = CreateWindowExW(
-    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
     OUT_CLS, L"FSRScale",
     WS_POPUP, 0, 0, w, h, nullptr, nullptr, i, nullptr);
   if (hwnd) {
