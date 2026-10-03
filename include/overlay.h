@@ -21,3 +21,4 @@ void overlaySetFsrEnabled(bool enabled);
 bool overlayConsumeFsrToggle();
 bool overlayConsumeScreenshot();
 const OverlayHudConfig& overlayConfig();
+std::wstring overlayScreenshotPath();
