@@ -92,6 +92,8 @@ static void unregisterRawMouse()
 
 static void handleRawMouse(HRAWINPUT handle)
 {
+  // Observe raw input only. Never move or clip the system cursor here.
+  // The foreground game receives its own raw input independently.
   if (g_overlayOpen || !handle) return;
 
   UINT size = 0;
@@ -106,33 +108,6 @@ static void handleRawMouse(HRAWINPUT handle)
 
   const RAWINPUT* raw = reinterpret_cast<const RAWINPUT*>(data.data());
   if (raw->header.dwType != RIM_TYPEMOUSE) return;
-
-  if (!g_cursorInitialized) initializeGameCursor();
-
-  const RAWMOUSE& m = raw->data.mouse;
-  RECT rc{};
-  if (!outputScreenRect(rc)) return;
-
-  if (m.usFlags & MOUSE_MOVE_ABSOLUTE) {
-    // Raw absolute coordinates are normalized to 0..65535.
-    g_cursorX = rc.left + MulDiv(m.lLastX, rc.right - rc.left - 1, 65535);
-    g_cursorY = rc.top + MulDiv(m.lLastY, rc.bottom - rc.top - 1, 65535);
-    g_cursorX = std::clamp<LONG>(g_cursorX, rc.left, rc.right - 1);
-    g_cursorY = std::clamp<LONG>(g_cursorY, rc.top, rc.bottom - 1);
-    SetCursorPos(g_cursorX, g_cursorY);
-    ClipCursor(&rc);
-  } else if (m.lLastX || m.lLastY) {
-    // Relative mice naturally move the system cursor. We only maintain the
-    // logical bounds here; SetCursorPos is intentionally NOT called for every
-    // relative packet, which would fight games that recenter the cursor.
-    g_cursorX += m.lLastX;
-    g_cursorY += m.lLastY;
-    g_cursorX = std::clamp<LONG>(g_cursorX, rc.left, rc.right - 1);
-    g_cursorY = std::clamp<LONG>(g_cursorY, rc.top, rc.bottom - 1);
-    ClipCursor(&rc);
-  } else {
-    ClipCursor(&rc);
-  }
 }
 
 
@@ -203,8 +178,7 @@ static void applyOverlayActivation(bool open)
     if (g_target && IsWindow(g_target)) {
       AllowSetForegroundWindow(ASFW_ANY);
       SetForegroundWindow(g_target);
-      initializeGameCursor();
-      clipCursorToOutput(true);
+      // Do not SetCursorPos/ClipCursor here. The target owns cursor state.
     }
   }
 }
@@ -269,19 +243,12 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
     // Game mode: the target is foreground and receives the real mouse/raw
     // input. Do not post synthetic WM_MOUSE messages to it.
     return 0;
-  case WM_SETCURSOR: {
-    if (g_overlayOpen) return DefWindowProcW(h, m, w, l);
+  case WM_SETCURSOR:
+    // Never overwrite the game's cursor from the presentation window.
+    if (!g_overlayOpen)
+      return FALSE;
+    return DefWindowProcW(h, m, w, l);
 
-    // Do not decide cursor visibility ourselves. Games commonly use
-    // ShowCursor/SetCursor to hide their cursor; mirror that global state.
-    CURSORINFO ci{ sizeof(ci) };
-    if (GetCursorInfo(&ci) && !(ci.flags & CURSOR_SHOWING)) {
-      SetCursor(nullptr);
-      return TRUE;
-    }
-    SetCursor(LoadCursor(nullptr, IDC_ARROW));
-    return TRUE;
-  }
   case WM_KEYDOWN: case WM_KEYUP:
   case WM_SYSKEYDOWN: case WM_SYSKEYUP:
   case WM_CHAR: case WM_SYSCHAR:
@@ -346,7 +313,6 @@ HWND createOutput(HINSTANCE i, int w, int h)
   if (hwnd) {
     g_output = hwnd;
     registerRawMouse(hwnd);
-    initializeGameCursor();
     // WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Win10 2004+)
     SetWindowDisplayAffinity(hwnd, 0x00000011);
   }
@@ -364,8 +330,8 @@ void setOutputFullscreen(HWND h, HMONITOR mon)
                mi.rcMonitor.right - mi.rcMonitor.left,
                mi.rcMonitor.bottom - mi.rcMonitor.top,
                SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOACTIVATE);
-  initializeGameCursor();
-  clipCursorToOutput(true);
+  // Do not initialize, reposition, or clip the real cursor here.
+  // The target game owns cursor/input state.
 }
 
 void setOutputWindowed(HWND h, int w, int t)
