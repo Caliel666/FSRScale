@@ -15,6 +15,8 @@ static OverlayHudConfig g_cfg{};
 static float g_lastFps=0,g_lastMs=0; static Size g_cap{},g_out{};
 static std::wstring g_shotPath;
 
+static void updateFpsPos();
+
 static std::wstring iniPath(){ wchar_t p[MAX_PATH]{}; GetModuleFileNameW(nullptr,p,MAX_PATH); std::wstring s=p; auto n=s.find_last_of(L"\\/"); return s.substr(0,n+1)+L"scaleconfig.ini"; }
 static void loadCfg(){
   wchar_t b[1024]{};
