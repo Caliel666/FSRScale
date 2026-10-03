@@ -71,6 +71,7 @@ static LRESULT CALLBACK settingsProc(HWND h,UINT m,WPARAM w,LPARAM l){
     if(LOWORD(w)==101){g_cfg.fps=IsDlgButtonChecked(h,101)==BST_CHECKED;saveCfg();InvalidateRect(g_fps,nullptr,FALSE);}
     if(LOWORD(w)==102){g_cfg.frametime=IsDlgButtonChecked(h,102)==BST_CHECKED;saveCfg();}
     if(LOWORD(w)==103){g_cfg.resolution=IsDlgButtonChecked(h,103)==BST_CHECKED;saveCfg();}
+    if(HIWORD(w)==EN_CHANGE && LOWORD(w)==104){ wchar_t p[MAX_PATH*4]{}; GetWindowTextW(g_pathEdit,p,MAX_PATH*4); g_shotPath=p; saveCfg(); return 0; }
     if(LOWORD(w)==105){
       wchar_t p[MAX_PATH*4]{};BROWSEINFOW bi{};bi.hwndOwner=h;bi.lpszTitle=L"Choose screenshot folder";LPITEMIDLIST id=SHBrowseForFolderW(&bi);
       if(id){SHGetPathFromIDListW(id,p);CoTaskMemFree(id);if(p[0]){g_shotPath=p;saveCfg();}}
@@ -83,7 +84,7 @@ static LRESULT CALLBACK uiProc(HWND h,UINT m,WPARAM w,LPARAM l){
   if(m==WM_LBUTTONUP){POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)};const int s=56,g=10,left=16;
     for(int i=0;i<4;i++){RECT b{left+i*(s+g),12,left+i*(s+g)+s,68};if(PtInRect(&b,p)){
       if(i==0){g_fsr=!g_fsr;g_toggleFsr=true;}
-      else if(i==1){g_fpsVisible=!g_fpsVisible;saveCfg();}
+      else if(i==1){g_fpsVisible=!g_fpsVisible;saveCfg();updateFpsPos();}
       else if(i==2){g_screenshot=true;}
       else { if(g_settings){ if(IsWindowVisible(g_settings)){ ShowWindow(g_settings,SW_HIDE); } else { if(g_pathEdit) SetWindowTextW(g_pathEdit,g_shotPath.c_str()); ShowWindow(g_settings,SW_SHOWNOACTIVATE); InvalidateRect(g_settings,nullptr,FALSE); } } }
       InvalidateRect(h,nullptr,FALSE); return 0;}}
@@ -114,7 +115,7 @@ bool overlayInit(HINSTANCE inst,HWND output){
     CreateWindowW(L"BUTTON",L"FPS",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,24,92,100,26,g_settings,(HMENU)101,inst,nullptr);
     CreateWindowW(L"BUTTON",L"Frametime",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,130,92,120,26,g_settings,(HMENU)102,inst,nullptr);
     CreateWindowW(L"BUTTON",L"Resolution",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,260,92,120,26,g_settings,(HMENU)103,inst,nullptr);
-    g_pathEdit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",g_shotPath.c_str(),WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,24,150,380,28,g_settings,nullptr,inst,nullptr);
+    g_pathEdit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",g_shotPath.c_str(),WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,24,150,380,28,g_settings,(HMENU)104,inst,nullptr);
     CreateWindowW(L"BUTTON",L"Browse...",WS_CHILD|WS_VISIBLE,414,150,82,28,g_settings,(HMENU)105,inst,nullptr);
     CheckDlgButton(g_settings,101,g_cfg.fps?BST_CHECKED:BST_UNCHECKED);
     CheckDlgButton(g_settings,102,g_cfg.frametime?BST_CHECKED:BST_UNCHECKED);
@@ -130,3 +131,5 @@ void overlaySetFsrEnabled(bool e){g_fsr=e;if(g_ui)InvalidateRect(g_ui,nullptr,FA
 bool overlayConsumeFsrToggle(){bool v=g_toggleFsr;g_toggleFsr=false;return v;}
 bool overlayConsumeScreenshot(){bool v=g_screenshot;g_screenshot=false;return v;}
 const OverlayHudConfig& overlayConfig(){return g_cfg;}
+
+std::wstring overlayScreenshotPath(){ return g_shotPath; }
