@@ -2,6 +2,7 @@
 #include <windowsx.h>
 #include <algorithm>
 #include <cstring>
+#include <cmath>
 
 static const wchar_t* OUT_CLS = L"FSRScaleOutput";
 static const wchar_t* HUD_CLS = L"FSRScaleHud";
