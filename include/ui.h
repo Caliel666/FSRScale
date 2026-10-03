@@ -20,6 +20,7 @@ void updateHud(HWND hud, const HudInfo& info);
 
 void setCaptureTarget(HWND target);
 void setScaleSizes(Size capture, Size output);
+void drawCursor();
 void setBindBypassVks(const UINT* vks, size_t count);
 
 // Steam-style overlay: HUD + mouse not forwarded to game + cursor clipped
