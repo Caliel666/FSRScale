@@ -142,7 +142,7 @@ target_compile_definitions(NRLive PRIVATE
 )
 
 target_link_libraries(NRLive PRIVATE
-  d3d11 d3d12 dxgi dxguid windowsapp shcore d3dcompiler dwmapi gdi32
+  d3d11 d3d12 dxgi dxguid windowsapp shcore d3dcompiler dwmapi gdi32 windowscodecs
 )
 
 set_target_properties(NRLive PROPERTIES
