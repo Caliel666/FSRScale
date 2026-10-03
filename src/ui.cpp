@@ -4,12 +4,118 @@
 static const wchar_t* OUT_CLS = L"FSRScaleOutput";
 static const wchar_t* HUD_CLS = L"FSRScaleHud";
 static HWND g_hudOwner = nullptr;
+
+static UINT g_bypassVks[32]{};
+static size_t g_bypassCount = 0;
+
+void setBindBypassVks(const UINT* vks, size_t count)
+{
+  g_bypassCount = 0;
+  if (!vks || !count) return;
+  if (count > 32) count = 32;
+  for (size_t i = 0; i < count; ++i)
+    g_bypassVks[g_bypassCount++] = vks[i];
+}
+
+static bool isBypassVk(UINT vk)
+{
+  for (size_t i = 0; i < g_bypassCount; ++i)
+    if (g_bypassVks[i] == vk) return true;
+  return false;
+}
+
 static HWND g_target = nullptr;
+static HWND g_output = nullptr;
+static HWND g_overlayHud = nullptr;
 static HudInfo g_hud;
 static Size g_captureSize{};
 static Size g_outputSize{};
+static bool g_overlayOpen = false;
+static LONG_PTR g_savedExStyle = 0;
 
 void setCaptureTarget(HWND target) { g_target = target; }
+
+void setOverlayHud(HWND hud) { g_overlayHud = hud; }
+
+HWND outputHwnd() { return g_output; }
+
+bool isOverlayOpen() { return g_overlayOpen; }
+
+// Clip cursor to the presentation window client area (game view on screen).
+static void clipCursorToOutput(bool enable)
+{
+  if (!enable) {
+    ClipCursor(nullptr);
+    return;
+  }
+  HWND h = g_output;
+  if (!h || !IsWindow(h)) return;
+  RECT rc{};
+  if (!GetClientRect(h, &rc)) return;
+  POINT tl{ rc.left, rc.top };
+  POINT br{ rc.right, rc.bottom };
+  ClientToScreen(h, &tl);
+  ClientToScreen(h, &br);
+  RECT screen{ tl.x, tl.y, br.x, br.y };
+  ClipCursor(&screen);
+}
+
+static void applyOverlayActivation(bool open)
+{
+  HWND h = g_output;
+  if (!h || !IsWindow(h)) return;
+
+  if (open) {
+    // OptiScaler / ReShade need a real activatable, focused window.
+    g_savedExStyle = GetWindowLongPtrW(h, GWL_EXSTYLE);
+    SetWindowLongPtrW(h, GWL_EXSTYLE,
+      (g_savedExStyle & ~WS_EX_NOACTIVATE) | WS_EX_TOPMOST);
+    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    AllowSetForegroundWindow(ASFW_ANY);
+    // Attach input so SetForegroundWindow succeeds from our thread.
+    const DWORD fgTid = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+    const DWORD ourTid = GetCurrentThreadId();
+    if (fgTid && fgTid != ourTid)
+      AttachThreadInput(fgTid, ourTid, TRUE);
+    SetForegroundWindow(h);
+    BringWindowToTop(h);
+    SetActiveWindow(h);
+    SetFocus(h);
+    if (fgTid && fgTid != ourTid)
+      AttachThreadInput(fgTid, ourTid, FALSE);
+
+    clipCursorToOutput(true);
+  } else {
+    ClipCursor(nullptr);
+    if (GetCapture()) ReleaseCapture();
+    // Restore non-activating presentation surface so the game keeps input.
+    LONG_PTR ex = g_savedExStyle ? g_savedExStyle
+      : (WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+    SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_TOPMOST | WS_EX_NOACTIVATE);
+    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    // Return focus toward the game if possible.
+    if (g_target && IsWindow(g_target)) {
+      AllowSetForegroundWindow(ASFW_ANY);
+      SetForegroundWindow(g_target);
+    }
+  }
+}
+
+void setOverlayOpen(bool open)
+{
+  if (g_overlayOpen == open) return;
+  g_overlayOpen = open;
+
+  if (g_overlayHud && IsWindow(g_overlayHud)) {
+    ShowWindow(g_overlayHud, open ? SW_SHOWNOACTIVATE : SW_HIDE);
+    if (open) InvalidateRect(g_overlayHud, nullptr, FALSE);
+  }
+
+  applyOverlayActivation(open);
+}
 void setScaleSizes(Size capture, Size output)
 {
   g_captureSize = capture;
@@ -36,6 +142,8 @@ static bool mapOutputToTargetClient(int ox, int oy, int& tx, int& ty)
 
 static void forwardMouse(UINT msg, WPARAM wParam, LPARAM lParam)
 {
+  // Steam-style: while FSRScale overlay is open, mouse stays here.
+  if (g_overlayOpen) return;
   if (!g_target || !IsWindow(g_target)) return;
 
   int ox = GET_X_LPARAM(lParam);
@@ -75,12 +183,26 @@ static void registerClass(const wchar_t* name, WNDPROC proc)
 static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
   switch (m) {
+  case WM_MOUSEACTIVATE:
+    // Game mode: never steal activation. Overlay mode: accept activation so
+    // OptiScaler / ReShade ImGui can take mouse + keyboard.
+    if (g_overlayOpen) return MA_ACTIVATE;
+    return MA_NOACTIVATE;
   case WM_MOUSEMOVE:
   case WM_LBUTTONDOWN: case WM_LBUTTONUP:
   case WM_RBUTTONDOWN: case WM_RBUTTONUP:
   case WM_MBUTTONDOWN: case WM_MBUTTONUP:
   case WM_MOUSEWHEEL:
-    // Keep mouse captured while a button is held so we don't lose tracking.
+    if (g_overlayOpen) {
+      // Overlay owns the mouse — do not forward to the game. Keep clip + capture.
+      if (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)
+        SetCapture(h);
+      if (m == WM_LBUTTONUP || m == WM_RBUTTONUP || m == WM_MBUTTONUP)
+        ReleaseCapture();
+      clipCursorToOutput(true);
+      return DefWindowProcW(h, m, w, l);
+    }
+    // Game mode: forward mapped mouse to the capture target.
     if (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)
       SetCapture(h);
     if (m == WM_LBUTTONUP || m == WM_RBUTTONUP || m == WM_MBUTTONUP)
@@ -93,9 +215,12 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
   case WM_KEYDOWN: case WM_KEYUP:
   case WM_SYSKEYDOWN: case WM_SYSKEYUP:
   case WM_CHAR: case WM_SYSCHAR:
+    // Overlay mode or bypass keys: keep on this window for OptiScaler/ReShade.
+    if (g_overlayOpen || isBypassVk((UINT)w))
+      return DefWindowProcW(h, m, w, l);
     if (g_target && IsWindow(g_target))
       PostMessageW(g_target, m, w, l);
-    return 0;
+    return DefWindowProcW(h, m, w, l);
   case WM_CLOSE:
     PostQuitMessage(0);
     return 0;
@@ -143,11 +268,11 @@ HWND createOutput(HINSTANCE i, int w, int h)
 {
   registerClass(OUT_CLS, outProc);
   HWND hwnd = CreateWindowExW(
-    WS_EX_TOPMOST | WS_EX_APPWINDOW,
+    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
     OUT_CLS, L"FSRScale",
     WS_POPUP, 0, 0, w, h, nullptr, nullptr, i, nullptr);
-  // Prevent our overlay from being fed back into capture paths.
   if (hwnd) {
+    g_output = hwnd;
     // WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Win10 2004+)
     SetWindowDisplayAffinity(hwnd, 0x00000011);
   }
@@ -159,18 +284,18 @@ void setOutputFullscreen(HWND h, HMONITOR mon)
   MONITORINFO mi{ sizeof(mi) };
   GetMonitorInfoW(mon, &mi);
   SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP);
-  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_APPWINDOW);
+  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
   SetWindowPos(h, HWND_TOPMOST,
                mi.rcMonitor.left, mi.rcMonitor.top,
                mi.rcMonitor.right - mi.rcMonitor.left,
                mi.rcMonitor.bottom - mi.rcMonitor.top,
-               SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+               SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOACTIVATE);
 }
 
 void setOutputWindowed(HWND h, int w, int t)
 {
   SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP | WS_BORDER);
-  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_APPWINDOW);
+  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
   SetWindowPos(h, HWND_TOPMOST, 80, 80, w, t, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
 }
 
@@ -197,6 +322,8 @@ void updateHud(HWND hud, const HudInfo& info)
   // Always update the cached info (used by WM_PAINT when it does fire).
   g_hud = info;
   if (!hud) return;
+  // Steam-style: HUD only paints while the FSRScale overlay is open.
+  if (!g_overlayOpen) return;
 
   // Throttle HUD repaints to ~5 Hz (200 ms).  The overlay text is informational
   // only — frame-by-frame redraws force a GDI InvalidateRect + BeginPaint /
@@ -225,7 +352,7 @@ void updateHud(HWND hud, const HudInfo& info)
   if (o.left != s_lastOwnerRect.left || o.top != s_lastOwnerRect.top) {
     s_lastOwnerRect = o;
     SetWindowPos(hud, HWND_TOPMOST, o.left + 12, o.top + 12, 820, 76,
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                 SWP_NOACTIVATE | SWP_NOSIZE | (g_overlayOpen ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
   }
   InvalidateRect(hud, nullptr, FALSE);
 }

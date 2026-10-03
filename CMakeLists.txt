@@ -126,6 +126,7 @@ add_executable(FSRScale WIN32
   src/capture.cpp
   src/fsr.cpp
   src/amdof.cpp
+  src/fastmv.cpp
   src/ui.cpp
   src/target.cpp
 )
