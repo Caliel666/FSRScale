@@ -1,5 +1,7 @@
 #include "ui.h"
 #include <windowsx.h>
+#include <algorithm>
+#include <vector>
 
 static const wchar_t* OUT_CLS = L"FSRScaleOutput";
 static const wchar_t* HUD_CLS = L"FSRScaleHud";
@@ -32,6 +34,107 @@ static Size g_captureSize{};
 static Size g_outputSize{};
 static bool g_overlayOpen = false;
 static LONG_PTR g_savedExStyle = 0;
+
+// Game mode uses the physical mouse stream rather than synthesizing legacy
+// WM_MOUSE* messages. The target remains foreground and receives the same raw
+// input itself; FSRScale only keeps the presentation cursor clipped to output.
+static bool g_rawMouseRegistered = false;
+static LONG g_cursorX = 0;
+static LONG g_cursorY = 0;
+static bool g_cursorInitialized = false;
+
+static bool outputScreenRect(RECT& out)
+{
+  HWND h = g_output;
+  if (!h || !IsWindow(h)) return false;
+  RECT rc{};
+  if (!GetClientRect(h, &rc)) return false;
+  POINT tl{ rc.left, rc.top }, br{ rc.right, rc.bottom };
+  ClientToScreen(h, &tl);
+  ClientToScreen(h, &br);
+  out = { tl.x, tl.y, br.x, br.y };
+  return out.right > out.left && out.bottom > out.top;
+}
+
+static void initializeGameCursor()
+{
+  RECT rc{};
+  if (!outputScreenRect(rc)) return;
+  POINT p{};
+  if (!GetCursorPos(&p)) return;
+  g_cursorX = std::clamp<LONG>(p.x, rc.left, rc.right - 1);
+  g_cursorY = std::clamp<LONG>(p.y, rc.top, rc.bottom - 1);
+  g_cursorInitialized = true;
+}
+
+static void registerRawMouse(HWND hwnd)
+{
+  if (!hwnd || g_rawMouseRegistered) return;
+  RAWINPUTDEVICE rid{};
+  rid.usUsagePage = 0x01;
+  rid.usUsage = 0x02;
+  rid.dwFlags = RIDEV_INPUTSINK;
+  rid.hwndTarget = hwnd;
+  g_rawMouseRegistered = RegisterRawInputDevices(&rid, 1, sizeof(rid)) != FALSE;
+}
+
+static void unregisterRawMouse()
+{
+  if (!g_rawMouseRegistered) return;
+  RAWINPUTDEVICE rid{};
+  rid.usUsagePage = 0x01;
+  rid.usUsage = 0x02;
+  rid.dwFlags = RIDEV_REMOVE;
+  rid.hwndTarget = nullptr;
+  RegisterRawInputDevices(&rid, 1, sizeof(rid));
+  g_rawMouseRegistered = false;
+}
+
+static void handleRawMouse(HRAWINPUT handle)
+{
+  if (g_overlayOpen || !handle) return;
+
+  UINT size = 0;
+  if (GetRawInputData(handle, RID_INPUT, nullptr, &size,
+                      sizeof(RAWINPUTHEADER)) == (UINT)-1 || size == 0)
+    return;
+
+  std::vector<BYTE> data(size);
+  if (GetRawInputData(handle, RID_INPUT, data.data(), &size,
+                      sizeof(RAWINPUTHEADER)) == (UINT)-1)
+    return;
+
+  const RAWINPUT* raw = reinterpret_cast<const RAWINPUT*>(data.data());
+  if (raw->header.dwType != RIM_TYPEMOUSE) return;
+
+  if (!g_cursorInitialized) initializeGameCursor();
+
+  const RAWMOUSE& m = raw->data.mouse;
+  RECT rc{};
+  if (!outputScreenRect(rc)) return;
+
+  if (m.usFlags & MOUSE_MOVE_ABSOLUTE) {
+    // Raw absolute coordinates are normalized to 0..65535.
+    g_cursorX = rc.left + MulDiv(m.lLastX, rc.right - rc.left - 1, 65535);
+    g_cursorY = rc.top + MulDiv(m.lLastY, rc.bottom - rc.top - 1, 65535);
+    g_cursorX = std::clamp<LONG>(g_cursorX, rc.left, rc.right - 1);
+    g_cursorY = std::clamp<LONG>(g_cursorY, rc.top, rc.bottom - 1);
+    SetCursorPos(g_cursorX, g_cursorY);
+    ClipCursor(&rc);
+  } else if (m.lLastX || m.lLastY) {
+    // Relative mice naturally move the system cursor. We only maintain the
+    // logical bounds here; SetCursorPos is intentionally NOT called for every
+    // relative packet, which would fight games that recenter the cursor.
+    g_cursorX += m.lLastX;
+    g_cursorY += m.lLastY;
+    g_cursorX = std::clamp<LONG>(g_cursorX, rc.left, rc.right - 1);
+    g_cursorY = std::clamp<LONG>(g_cursorY, rc.top, rc.bottom - 1);
+    ClipCursor(&rc);
+  } else {
+    ClipCursor(&rc);
+  }
+}
+
 
 void setCaptureTarget(HWND target) { g_target = target; }
 
@@ -100,6 +203,8 @@ static void applyOverlayActivation(bool open)
     if (g_target && IsWindow(g_target)) {
       AllowSetForegroundWindow(ASFW_ANY);
       SetForegroundWindow(g_target);
+      initializeGameCursor();
+      clipCursorToOutput(true);
     }
   }
 }
@@ -122,52 +227,6 @@ void setScaleSizes(Size capture, Size output)
   g_outputSize = output;
 }
 
-static bool mapOutputToTargetClient(int ox, int oy, int& tx, int& ty)
-{
-  if (!g_target || !IsWindow(g_target)) return false;
-  if (g_outputSize.w == 0 || g_outputSize.h == 0) return false;
-  RECT tr{};
-  if (!GetClientRect(g_target, &tr)) return false;
-  const int tw = tr.right - tr.left;
-  const int th = tr.bottom - tr.top;
-  if (tw <= 0 || th <= 0) return false;
-  tx = (int)((double)ox * tw / (double)g_outputSize.w);
-  ty = (int)((double)oy * th / (double)g_outputSize.h);
-  if (tx < 0) tx = 0;
-  if (ty < 0) ty = 0;
-  if (tx >= tw) tx = tw - 1;
-  if (ty >= th) ty = th - 1;
-  return true;
-}
-
-static void forwardMouse(UINT msg, WPARAM wParam, LPARAM lParam)
-{
-  // Steam-style: while FSRScale overlay is open, mouse stays here.
-  if (g_overlayOpen) return;
-  if (!g_target || !IsWindow(g_target)) return;
-
-  int ox = GET_X_LPARAM(lParam);
-  int oy = GET_Y_LPARAM(lParam);
-  int tx = 0, ty = 0;
-  if (!mapOutputToTargetClient(ox, oy, tx, ty)) return;
-
-  // Magpie-style: keep the visible cursor on the overlay. Do NOT SetCursorPos
-  // to the game window (that caused continuous upward drift). Only forward
-  // client-space messages so the game sees the mapped position.
-  LPARAM lp = MAKELPARAM(tx, ty);
-  switch (msg) {
-  case WM_MOUSEMOVE:
-  case WM_LBUTTONDOWN: case WM_LBUTTONUP:
-  case WM_RBUTTONDOWN: case WM_RBUTTONUP:
-  case WM_MBUTTONDOWN: case WM_MBUTTONUP:
-    PostMessageW(g_target, msg, wParam, lp);
-    break;
-  case WM_MOUSEWHEEL:
-    PostMessageW(g_target, WM_MOUSEWHEEL, wParam, lp);
-    break;
-  default: break;
-  }
-}
 
 static void registerClass(const wchar_t* name, WNDPROC proc)
 {
@@ -188,13 +247,18 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
     // OptiScaler / ReShade ImGui can take mouse + keyboard.
     if (g_overlayOpen) return MA_ACTIVATE;
     return MA_NOACTIVATE;
+  case WM_INPUT:
+    if (!g_overlayOpen) {
+      handleRawMouse((HRAWINPUT)l);
+      return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
   case WM_MOUSEMOVE:
   case WM_LBUTTONDOWN: case WM_LBUTTONUP:
   case WM_RBUTTONDOWN: case WM_RBUTTONUP:
   case WM_MBUTTONDOWN: case WM_MBUTTONUP:
   case WM_MOUSEWHEEL:
     if (g_overlayOpen) {
-      // Overlay owns the mouse — do not forward to the game. Keep clip + capture.
       if (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)
         SetCapture(h);
       if (m == WM_LBUTTONUP || m == WM_RBUTTONUP || m == WM_MBUTTONUP)
@@ -202,16 +266,22 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
       clipCursorToOutput(true);
       return DefWindowProcW(h, m, w, l);
     }
-    // Game mode: forward mapped mouse to the capture target.
-    if (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN)
-      SetCapture(h);
-    if (m == WM_LBUTTONUP || m == WM_RBUTTONUP || m == WM_MBUTTONUP)
-      ReleaseCapture();
-    forwardMouse(m, w, l);
+    // Game mode: the target is foreground and receives the real mouse/raw
+    // input. Do not post synthetic WM_MOUSE messages to it.
     return 0;
-  case WM_SETCURSOR:
+  case WM_SETCURSOR: {
+    if (g_overlayOpen) return DefWindowProcW(h, m, w, l);
+
+    // Do not decide cursor visibility ourselves. Games commonly use
+    // ShowCursor/SetCursor to hide their cursor; mirror that global state.
+    CURSORINFO ci{ sizeof(ci) };
+    if (GetCursorInfo(&ci) && !(ci.flags & CURSOR_SHOWING)) {
+      SetCursor(nullptr);
+      return TRUE;
+    }
     SetCursor(LoadCursor(nullptr, IDC_ARROW));
     return TRUE;
+  }
   case WM_KEYDOWN: case WM_KEYUP:
   case WM_SYSKEYDOWN: case WM_SYSKEYUP:
   case WM_CHAR: case WM_SYSCHAR:
@@ -225,6 +295,8 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
     PostQuitMessage(0);
     return 0;
   case WM_DESTROY:
+    unregisterRawMouse();
+    ClipCursor(nullptr);
     PostQuitMessage(0);
     return 0;
   default:
@@ -273,6 +345,8 @@ HWND createOutput(HINSTANCE i, int w, int h)
     WS_POPUP, 0, 0, w, h, nullptr, nullptr, i, nullptr);
   if (hwnd) {
     g_output = hwnd;
+    registerRawMouse(hwnd);
+    initializeGameCursor();
     // WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Win10 2004+)
     SetWindowDisplayAffinity(hwnd, 0x00000011);
   }
@@ -290,6 +364,8 @@ void setOutputFullscreen(HWND h, HMONITOR mon)
                mi.rcMonitor.right - mi.rcMonitor.left,
                mi.rcMonitor.bottom - mi.rcMonitor.top,
                SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+  initializeGameCursor();
+  ClipCursor(nullptr);
 }
 
 void setOutputWindowed(HWND h, int w, int t)
