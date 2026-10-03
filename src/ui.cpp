@@ -1,6 +1,7 @@
 #include "ui.h"
 #include <windowsx.h>
 #include <algorithm>
+#include <cstring>
 
 static const wchar_t* OUT_CLS = L"FSRScaleOutput";
 static const wchar_t* HUD_CLS = L"FSRScaleHud";
@@ -72,55 +73,6 @@ static Size g_outputSize{};
 static bool g_overlayOpen = false;
 static LONG_PTR g_savedExStyle = 0;
 
-// Game mode uses the physical mouse stream rather than synthesizing legacy
-// WM_MOUSE* messages. The target remains foreground and receives the same raw
-// input itself; FSRScale only keeps the presentation cursor clipped to output.
-static bool g_rawMouseRegistered = false;
-
-static void registerRawMouse(HWND hwnd)
-{
-  if (!hwnd || g_rawMouseRegistered) return;
-  RAWINPUTDEVICE rid{};
-  rid.usUsagePage = 0x01;
-  rid.usUsage = 0x02;
-  rid.dwFlags = RIDEV_INPUTSINK;
-  rid.hwndTarget = hwnd;
-  g_rawMouseRegistered = RegisterRawInputDevices(&rid, 1, sizeof(rid)) != FALSE;
-}
-
-static void unregisterRawMouse()
-{
-  if (!g_rawMouseRegistered) return;
-  RAWINPUTDEVICE rid{};
-  rid.usUsagePage = 0x01;
-  rid.usUsage = 0x02;
-  rid.dwFlags = RIDEV_REMOVE;
-  rid.hwndTarget = nullptr;
-  RegisterRawInputDevices(&rid, 1, sizeof(rid));
-  g_rawMouseRegistered = false;
-}
-
-static void handleRawMouse(HRAWINPUT handle)
-{
-  // Observe raw input only. Never move or clip the system cursor here.
-  // The foreground game receives its own raw input independently.
-  if (g_overlayOpen || !handle) return;
-
-  UINT size = 0;
-  if (GetRawInputData(handle, RID_INPUT, nullptr, &size,
-                      sizeof(RAWINPUTHEADER)) == (UINT)-1 || size == 0)
-    return;
-
-  std::vector<BYTE> data(size);
-  if (GetRawInputData(handle, RID_INPUT, data.data(), &size,
-                      sizeof(RAWINPUTHEADER)) == (UINT)-1)
-    return;
-
-  const RAWINPUT* raw = reinterpret_cast<const RAWINPUT*>(data.data());
-  if (raw->header.dwType != RIM_TYPEMOUSE) return;
-}
-
-
 void setCaptureTarget(HWND target) { g_target = target; }
 
 void setOverlayHud(HWND hud) { g_overlayHud = hud; }
@@ -128,6 +80,8 @@ void setOverlayHud(HWND hud) { g_overlayHud = hud; }
 HWND outputHwnd() { return g_output; }
 
 bool isOverlayOpen() { return g_overlayOpen; }
+
+static void clipCursorToOutput(bool enable);
 
 // Clip cursor to the presentation window client area (game view on screen).
 static void clipCursorToOutput(bool enable)
