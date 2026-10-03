@@ -252,11 +252,38 @@ static void drawCursor()
     return;
   }
 
-  // The output is a fullscreen presentation surface. Keep the cursor in
-  // physical screen coordinates so it stays pixel-accurate instead of being
-  // scaled with the game image.
-  const int x = ci.ptScreenPos.x - (int)g_cursorHotspot.x;
-  const int y = ci.ptScreenPos.y - (int)g_cursorHotspot.y;
+  // Map the source-window cursor into the fullscreen presentation rectangle.
+  // This is the important distinction from merely drawing the system cursor:
+  // a 1280x720 source scaled to 1920x1080 needs the cursor transformed by the
+  // same source->destination mapping, while the cursor bitmap itself stays
+  // native-resolution and is therefore not blurred by FSR.
+  POINT visualPos = ci.ptScreenPos;
+  if (g_target && IsWindow(g_target)) {
+    RECT src{};
+    if (GetClientRect(g_target, &src)) {
+      POINT srcTopLeft{ src.left, src.top };
+      POINT srcBottomRight{ src.right, src.bottom };
+      ClientToScreen(g_target, &srcTopLeft);
+      ClientToScreen(g_target, &srcBottomRight);
+
+      const int sw = srcBottomRight.x - srcTopLeft.x;
+      const int sh = srcBottomRight.y - srcTopLeft.y;
+      const int dw = out.right - out.left;
+      const int dh = out.bottom - out.top;
+
+      if (sw > 1 && sh > 1 &&
+          ci.ptScreenPos.x >= srcTopLeft.x && ci.ptScreenPos.x < srcBottomRight.x &&
+          ci.ptScreenPos.y >= srcTopLeft.y && ci.ptScreenPos.y < srcBottomRight.y) {
+        const double nx = double(ci.ptScreenPos.x - srcTopLeft.x) / double(sw - 1);
+        const double ny = double(ci.ptScreenPos.y - srcTopLeft.y) / double(sh - 1);
+        visualPos.x = out.left + (LONG)std::lround(nx * double(dw - 1));
+        visualPos.y = out.top  + (LONG)std::lround(ny * double(dh - 1));
+      }
+    }
+  }
+
+  const int x = visualPos.x - (int)g_cursorHotspot.x;
+  const int y = visualPos.y - (int)g_cursorHotspot.y;
 
   SetWindowPos(g_cursorWindow, HWND_TOPMOST,
                x, y, g_cursorW, g_cursorH,
