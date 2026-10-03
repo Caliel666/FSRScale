@@ -37,43 +37,6 @@ static Size g_outputSize{};
 static bool g_overlayOpen = false;
 static LONG_PTR g_savedExStyle = 0;
 
-include "ui.h"
-#include <windowsx.h>
-#include <algorithm>
-
-static const wchar_t* OUT_CLS = L"FSRScaleOutput";
-static const wchar_t* HUD_CLS = L"FSRScaleHud";
-static const wchar_t* CURSOR_CLS = L"FSRScaleCursor";
-static HWND g_hudOwner = nullptr;
-
-static UINT g_bypassVks[32]{};
-static size_t g_bypassCount = 0;
-
-void setBindBypassVks(const UINT* vks, size_t count)
-{
-  g_bypassCount = 0;
-  if (!vks || !count) return;
-  if (count > 32) count = 32;
-  for (size_t i = 0; i < count; ++i)
-    g_bypassVks[g_bypassCount++] = vks[i];
-}
-
-static bool isBypassVk(UINT vk)
-{
-  for (size_t i = 0; i < g_bypassCount; ++i)
-    if (g_bypassVks[i] == vk) return true;
-  return false;
-}
-
-static HWND g_target = nullptr;
-static HWND g_output = nullptr;
-static HWND g_overlayHud = nullptr;
-static HudInfo g_hud;
-static Size g_captureSize{};
-static Size g_outputSize{};
-static bool g_overlayOpen = false;
-static LONG_PTR g_savedExStyle = 0;
-
 void setCaptureTarget(HWND target) { g_target = target; }
 
 void setOverlayHud(HWND hud) { g_overlayHud = hud; }
@@ -103,11 +66,82 @@ static void clipCursorToOutput(bool enable)
   ClipCursor(&screen);
 }
 
+// Clip cursor to the TARGET (game) window's CLIENT-AREA screen rect.
+// Must match the source rect used by the cursor mapping in drawCursor()
+// (which also uses GetClientRect + ClientToScreen).  Using GetWindowRect
+// here would include the title bar / borders — the cursor could then sit
+// in the non-client area where the mapping condition fails, leaving the
+// drawn cursor at the wrong position.
+static void clipCursorToTarget()
+{
+  if (!g_target || !IsWindow(g_target)) { ClipCursor(nullptr); return; }
+  RECT rc{};
+  if (!GetClientRect(g_target, &rc)) { ClipCursor(nullptr); return; }
+  POINT tl{ rc.left, rc.top };
+  POINT br{ rc.right, rc.bottom };
+  ClientToScreen(g_target, &tl);
+  ClientToScreen(g_target, &br);
+  RECT screen{ tl.x, tl.y, br.x, br.y };
+  ClipCursor(&screen);
+}
+
 static HWND g_cursorWindow = nullptr;
 static HCURSOR g_drawnCursor = nullptr;
 static int g_cursorW = 32;
 static int g_cursorH = 32;
 static POINT g_cursorHotspot{};
+
+// ── System cursor visibility ─────────────────────────────────────────────
+// The public ShowCursor() is per-thread — it only affects the cursor when
+// the calling thread's window is in the foreground.  In game mode FSRScale
+// has WS_EX_NOACTIVATE so the game owns the foreground, and ShowCursor from
+// our thread has no effect.  We use the undocumented ShowSystemCursor from
+// user32.dll instead — it's system-wide.  Falls back to ShowCursor if the
+// function is not found.
+typedef void (WINAPI* ShowSystemCursor_t)(BOOL);
+static ShowSystemCursor_t g_showSystemCursor = nullptr;
+static bool g_systemCursorHidden = false;
+static int g_showCursorCount = 0;
+
+static void loadShowSystemCursor()
+{
+  if (g_showSystemCursor) return;
+  HMODULE u32 = GetModuleHandleW(L"user32.dll");
+  if (u32)
+    g_showSystemCursor = (ShowSystemCursor_t)GetProcAddress(u32, "ShowSystemCursor");
+}
+
+// Hide the real system cursor so only the drawn cursor is visible.
+// Only call this when the game is showing its cursor (GetCursorInfo says
+// CURSOR_SHOWING).  When the game hides its cursor we leave the system
+// cursor hidden too — the game already did ShowCursor(FALSE) and we
+// don't want to fight that.
+static void hideRealCursor()
+{
+  loadShowSystemCursor();
+  if (g_showSystemCursor) {
+    if (!g_systemCursorHidden) {
+      g_showSystemCursor(FALSE);
+      g_systemCursorHidden = true;
+    }
+  } else {
+    while (g_showCursorCount > -5) { ShowCursor(FALSE); --g_showCursorCount; }
+  }
+}
+
+// Show the real system cursor (for overlay mode or shutdown).
+static void showRealCursor()
+{
+  loadShowSystemCursor();
+  if (g_showSystemCursor) {
+    if (g_systemCursorHidden) {
+      g_showSystemCursor(TRUE);
+      g_systemCursorHidden = false;
+    }
+  } else {
+    while (g_showCursorCount < 0) { ShowCursor(TRUE); ++g_showCursorCount; }
+  }
+}
 
 static LRESULT CALLBACK cursorProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -219,18 +253,26 @@ static bool rebuildDrawnCursor(HCURSOR cursor)
   return true;
 }
 
-static void drawCursor()
+void drawCursor()
 {
   HWND h = g_output;
   if (!h || !IsWindow(h)) return;
 
-  // The real cursor must always be confined to the presentation surface in
-  // both game mode and overlay mode. Games can call ClipCursor themselves,
-  // so repeat this every frame just like Magpie's 3D-game path.
-  clipCursorToOutput(true);
+  // In game mode the real cursor must be confined to the TARGET (game)
+  // window's screen rect, not the FSRScale output window.  The game
+  // window is behind our transparent (WS_EX_TRANSPARENT) presentation
+  // surface.  Clipping to the game window ensures the OS routes mouse
+  // events to the game — events outside the game window would otherwise
+  // hit the desktop.  In overlay mode clip to the output window so the
+  // cursor stays inside the FSRScale presentation for menu interaction.
+  if (g_overlayOpen)
+    clipCursorToOutput(true);
+  else
+    clipCursorToTarget();
 
   // Overlay mode owns the real cursor. Do not put a second cursor on top of it.
   if (g_overlayOpen) {
+    showRealCursor();   // make sure the real cursor is visible for menus
     hideDrawnCursor();
     return;
   }
@@ -238,9 +280,18 @@ static void drawCursor()
   CURSORINFO ci{};
   ci.cbSize = sizeof(ci);
   if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
+    // The game hid its cursor.  Both the drawn cursor and the real cursor
+    // should be hidden.  Don't call showRealCursor() — the game already
+    // did ShowCursor(FALSE) and we don't want to fight it.
     hideDrawnCursor();
     return;
   }
+
+  // The game is showing its cursor.  Draw our mapped cursor AND hide the
+  // real system cursor so only the drawn one is visible.  When the game
+  // later hides its cursor, GetCursorInfo will report !CURSOR_SHOWING and
+  // we'll hide the drawn cursor too — both disappear together.
+  hideRealCursor();
 
   if (ci.hCursor != g_drawnCursor && !rebuildDrawnCursor(ci.hCursor)) {
     hideDrawnCursor();
@@ -298,7 +349,12 @@ static void applyOverlayActivation(bool open)
 
   if (open) {
     LONG_PTR style = GetWindowLongPtrW(h, GWL_EXSTYLE);
-    SetWindowLongPtrW(h, GWL_EXSTYLE, style & ~WS_EX_TRANSPARENT);
+    // Overlay mode: REMOVE WS_EX_LAYERED | WS_EX_TRANSPARENT so FSRScale
+    // receives mouse events for OptiScaler / ReShade menus.
+    SetWindowLongPtrW(h, GWL_EXSTYLE,
+      style & ~(WS_EX_TRANSPARENT | WS_EX_LAYERED));
+    SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     // OptiScaler / ReShade need a real activatable, focused window.
     g_savedExStyle = GetWindowLongPtrW(h, GWL_EXSTYLE);
     SetWindowLongPtrW(h, GWL_EXSTYLE,
@@ -320,20 +376,27 @@ static void applyOverlayActivation(bool open)
       AttachThreadInput(fgTid, ourTid, FALSE);
 
     clipCursorToOutput(true);
+    showRealCursor();   // overlay mode: make the real cursor visible for menus
   } else {
     ClipCursor(nullptr);
     if (GetCapture()) ReleaseCapture();
-    // Restore non-activating presentation surface so the game keeps input.
+    // Game mode: make the window transparent to mouse input so the OS
+    // routes events to the game window behind us.  WS_EX_TRANSPARENT alone
+    // does NOT work for top-level windows — you also need WS_EX_LAYERED
+    // + SetLayeredWindowAttributes(alpha=255) for the hit-test skip to
+    // take effect.  The window stays fully opaque (alpha 255); only mouse
+    // passes through.
     LONG_PTR ex = g_savedExStyle ? g_savedExStyle
       : (WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
-    SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT);
+    SetWindowLongPtrW(h, GWL_EXSTYLE,
+      ex | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED);
+    SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
     SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     // Return focus toward the game if possible.
     if (g_target && IsWindow(g_target)) {
       AllowSetForegroundWindow(ASFW_ANY);
       SetForegroundWindow(g_target);
-      // Do not SetCursorPos/ClipCursor here. The target owns cursor state.
     }
   }
 }
@@ -422,6 +485,7 @@ static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
   case WM_DESTROY:
     if (GetCapture() == h) ReleaseCapture();
     ClipCursor(nullptr);
+    showRealCursor();   // restore the system cursor on exit
     hideDrawnCursor();
     if (g_cursorWindow) { DestroyWindow(g_cursorWindow); g_cursorWindow = nullptr; }
     PostQuitMessage(0);
@@ -467,7 +531,7 @@ HWND createOutput(HINSTANCE i, int w, int h)
 {
   registerClass(OUT_CLS, outProc);
   HWND hwnd = CreateWindowExW(
-    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
     OUT_CLS, L"FSRScale",
     WS_POPUP, 0, 0, w, h, nullptr, nullptr, i, nullptr);
   if (hwnd) {
@@ -486,7 +550,8 @@ void setOutputFullscreen(HWND h, HMONITOR mon)
   SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP);
   SetWindowLongPtrW(h, GWL_EXSTYLE,
     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
-    (g_overlayOpen ? 0 : WS_EX_TRANSPARENT));
+    (g_overlayOpen ? 0 : (WS_EX_TRANSPARENT | WS_EX_LAYERED)));
+  if (!g_overlayOpen) SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
   SetWindowPos(h, HWND_TOPMOST,
                mi.rcMonitor.left, mi.rcMonitor.top,
                mi.rcMonitor.right - mi.rcMonitor.left,
