@@ -13,6 +13,9 @@ struct TargetSpec {
   bool help = false;
   bool noOverlay = false;
   bool front = false;
+  enum class MotionMode { AmdOf, Fast };
+  MotionMode motionMode = MotionMode::AmdOf;
+  std::wstring motionModeText = L"amdof";
   UINT stopHotkeyModifiers = MOD_CONTROL | MOD_SHIFT;
   UINT stopHotkeyVk = 'A';
   std::wstring stopHotkeyText = L"Ctrl+Shift+A";

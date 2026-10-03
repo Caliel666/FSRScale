@@ -2,6 +2,7 @@
 #include "capture.h"
 #include "fsr.h"
 #include "amdof.h"
+#include "fastmv.h"
 #include "ui.h"
 #include "target.h"
 #include <windows.h>
@@ -121,7 +122,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     }
 
     AmdOf amdof;
-    if (fsrOk) amdof.init(gfx.device(), gfx.queue(), render, false); // performance mode
+    FastMv fastmv;
+    if (fsrOk) {
+      amdof.init(gfx.device(), gfx.queue(), render, false); // existing implementation
+      if (spec.motionMode == TargetSpec::MotionMode::Fast)
+        fastmv.init(gfx.device(), render);
+    }
 
     HWND hud = spec.noOverlay ? nullptr : createHud(inst, out);
     setStatus(out, label.c_str());
@@ -133,8 +139,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&last);
 
-    ShowWindow(out, SW_SHOW);
-    SetForegroundWindow(out);
+    ShowWindow(out, SW_SHOWNOACTIVATE);
     if (hud) ShowWindow(hud, SW_SHOWNOACTIVATE);
 
     while (running) {
@@ -209,9 +214,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
           cmd->ResourceBarrier(3, b);
         }
 
-        // AMDOF dispatch (internally: writes mv as UAV, copies mv→prevMv
-        // and color→prevColorFull, restores mv to PS|NPS for FSR).
-        amdof.dispatch(cmd, color.Get(), mv, cs, reset);
+        // Motion dispatch. --mv amdof is the existing implementation; --mv fast is the
+        // new quarter-resolution screen-space estimator.
+        if (spec.motionMode == TargetSpec::MotionMode::Fast)
+          fastmv.dispatch(cmd, color.Get(), mv, cs, reset);
+        else
+          amdof.dispatch(cmd, color.Get(), mv, cs, reset);
 
         // FSR dispatch (reads color/depth/mv as SRV, writes upscale as UAV).
         // No barrier needed for mv — AMDOF left it in PS|NPS.
@@ -303,7 +311,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       hi.visible = !spec.noOverlay;
       hi.status = L"frames=" + std::to_wstring(cap.totalFrames()) +
                   (usedFsr ? L" FSR" : L" blit") +
-                  L" | " + spec.stopHotkeyText + L"=quit";
+                  L" | mv=" + spec.motionModeText + L" | " + spec.stopHotkeyText + L"=quit";
       updateHud(hud, hi);
     }
 
@@ -314,6 +322,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     // AMD driver on quit.
     gfx.waitForGpu();
 
+    fastmv.shutdown();
     amdof.shutdown();
     fsr.shutdown();
     cap.stop();

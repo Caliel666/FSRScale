@@ -344,7 +344,7 @@ std::wstring targetUsage()
         L"  FSRScale.exe -delay <sec>      wait before starting capture\n"
         L"  FSRScale.exe -nooverlay        disable the FSRScale HUD overlay\n"
         L"  FSRScale.exe --key ctrl+shift+a set the global stop hotkey\n"
-        L"  FSRScale.exe -help              show this text\n\n"
+        L"  FSRScale.exe --mv amdof|fast    select motion-vector implementation\n"        L"  FSRScale.exe -help              show this text\n\n"
         L"Long forms (--pid, --pname, --window, --front, --delay, --nooverlay, --key) are also accepted.\n"
         L"Window and process names use case-insensitive ECMAScript regex matching.\n";
 }
@@ -380,6 +380,19 @@ bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& e
             spec.mode = TargetMode::Process;
             spec.text = value;
             explicitTarget = true;
+        } else if (opt == L"--mv" || opt == L"-mv") {
+            if (!need(value)) return false;
+            std::wstring mv = lower(value);
+            if (mv == L"amdof") {
+                spec.motionMode = TargetSpec::MotionMode::AmdOf;
+                spec.motionModeText = L"amdof";
+            } else if (mv == L"fast") {
+                spec.motionMode = TargetSpec::MotionMode::Fast;
+                spec.motionModeText = L"fast";
+            } else {
+                error = L"invalid motion mode: " + value + L" (valid: amdof, fast)";
+                return false;
+            }
         } else if (opt == L"--front" || opt == L"-front") {
             spec.front = true;
             explicitTarget = true;

@@ -75,6 +75,10 @@ static void registerClass(const wchar_t* name, WNDPROC proc)
 static LRESULT CALLBACK outProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
   switch (m) {
+  case WM_MOUSEACTIVATE:
+    // The scaler is a presentation surface, never the active application.
+    // Keep the game foreground while still forwarding the mouse messages below.
+    return MA_NOACTIVATE;
   case WM_MOUSEMOVE:
   case WM_LBUTTONDOWN: case WM_LBUTTONUP:
   case WM_RBUTTONDOWN: case WM_RBUTTONUP:
@@ -143,7 +147,7 @@ HWND createOutput(HINSTANCE i, int w, int h)
 {
   registerClass(OUT_CLS, outProc);
   HWND hwnd = CreateWindowExW(
-    WS_EX_TOPMOST | WS_EX_APPWINDOW,
+    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
     OUT_CLS, L"FSRScale",
     WS_POPUP, 0, 0, w, h, nullptr, nullptr, i, nullptr);
   // Prevent our overlay from being fed back into capture paths.
@@ -159,18 +163,18 @@ void setOutputFullscreen(HWND h, HMONITOR mon)
   MONITORINFO mi{ sizeof(mi) };
   GetMonitorInfoW(mon, &mi);
   SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP);
-  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_APPWINDOW);
+  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
   SetWindowPos(h, HWND_TOPMOST,
                mi.rcMonitor.left, mi.rcMonitor.top,
                mi.rcMonitor.right - mi.rcMonitor.left,
                mi.rcMonitor.bottom - mi.rcMonitor.top,
-               SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+               SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOACTIVATE);
 }
 
 void setOutputWindowed(HWND h, int w, int t)
 {
   SetWindowLongPtrW(h, GWL_STYLE, WS_POPUP | WS_BORDER);
-  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_APPWINDOW);
+  SetWindowLongPtrW(h, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
   SetWindowPos(h, HWND_TOPMOST, 80, 80, w, t, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
 }
 

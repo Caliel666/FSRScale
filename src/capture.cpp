@@ -203,39 +203,40 @@ void Capture::recomputeClientArea(HWND hwnd)
     m_size = m_windowSize;
     return;
   }
+
   RECT clientRect{};
-  if (!GetClientRect(hwnd, &clientRect)) {
+  RECT windowRect{};
+  if (!GetClientRect(hwnd, &clientRect) || !GetWindowRect(hwnd, &windowRect)) {
     m_clientOffsetX = 0;
     m_clientOffsetY = 0;
     m_size = m_windowSize;
     return;
   }
-  // Client area top-left in screen coords.
+
   POINT pt{ 0, 0 };
   ClientToScreen(hwnd, &pt);
-  RECT windowRect{};
-  if (!GetWindowRect(hwnd, &windowRect)) {
-    m_clientOffsetX = 0;
-    m_clientOffsetY = 0;
-    m_size = m_windowSize;
-    return;
-  }
+
+  const int ww = std::max(1L, windowRect.right - windowRect.left);
+  const int wh = std::max(1L, windowRect.bottom - windowRect.top);
+  const int cw = std::max(1L, clientRect.right - clientRect.left);
+  const int ch = std::max(1L, clientRect.bottom - clientRect.top);
+
+  // WGC's GraphicsCaptureItem.Size is in the captured frame's physical pixels,
+  // while GetWindowRect/GetClientRect can be DPI-virtualized. Scale the HWND
+  // geometry into the actual WGC texture instead of assuming a 1:1 mapping.
+  const double sx = double(m_windowSize.w) / double(ww);
+  const double sy = double(m_windowSize.h) / double(wh);
   const int ox = pt.x - windowRect.left;
   const int oy = pt.y - windowRect.top;
-  const int cw = clientRect.right - clientRect.left;
-  const int ch = clientRect.bottom - clientRect.top;
-  // Clamp — if anything looks wrong, fall back to (0,0) offset + window size.
-  if (ox < 0 || oy < 0 || cw <= 0 || ch <= 0 ||
-      (UINT)ox + (UINT)cw > m_windowSize.w ||
-      (UINT)oy + (UINT)ch > m_windowSize.h) {
-    m_clientOffsetX = 0;
-    m_clientOffsetY = 0;
-    m_size = m_windowSize;
-    return;
-  }
-  m_clientOffsetX = (UINT)ox;
-  m_clientOffsetY = (UINT)oy;
-  m_size = { (uint32_t)cw, (uint32_t)ch };
+
+  m_clientOffsetX = (UINT)std::clamp((int)std::lround(ox * sx), 0, (int)m_windowSize.w - 1);
+  m_clientOffsetY = (UINT)std::clamp((int)std::lround(oy * sy), 0, (int)m_windowSize.h - 1);
+
+  const UINT maxW = m_windowSize.w - m_clientOffsetX;
+  const UINT maxH = m_windowSize.h - m_clientOffsetY;
+  const UINT clientW = (UINT)std::clamp((int)std::lround(cw * sx), 1, (int)maxW);
+  const UINT clientH = (UINT)std::clamp((int)std::lround(ch * sy), 1, (int)maxH);
+  m_size = { clientW, clientH };
 }
 
 bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue)

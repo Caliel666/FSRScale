@@ -130,7 +130,7 @@ bool FastMv::createPipeline(){
     return false;
 
   D3D12_DESCRIPTOR_HEAP_DESC hd{};
-  hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; hd.NumDescriptors=8;
+  hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; hd.NumDescriptors=12;
   hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
   if(FAILED(m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_heap)))) return false;
   m_stride=m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -191,7 +191,13 @@ void FastMv::createViews(ID3D12Resource* color,ID3D12Resource* full){
   u.Format=DXGI_FORMAT_R16G16_FLOAT;m_device->CreateUnorderedAccessView(m_coarse.Get(),nullptr,&u,at(4));
   m_device->CreateUnorderedAccessView(m_refined.Get(),nullptr,&u,at(5));
   m_device->CreateUnorderedAccessView(full,nullptr,&u,at(6));
-  // descriptor 7 reserved for future diagnostics.
+  // Up-sampling pass uses a second contiguous SRV/UAV table starting at 7.
+  s.Format=DXGI_FORMAT_R16G16_FLOAT;
+  m_device->CreateShaderResourceView(m_refined.Get(),&s,at(7));
+  m_device->CreateShaderResourceView(m_refined.Get(),&s,at(8));
+  m_device->CreateShaderResourceView(m_refined.Get(),&s,at(9));
+  u.Format=DXGI_FORMAT_R16G16_FLOAT;
+  m_device->CreateUnorderedAccessView(full,nullptr,&u,at(10));
 }
 
 static void setTable(ID3D12GraphicsCommandList* c,D3D12_GPU_DESCRIPTOR_HANDLE h,UINT stride,UINT base){
@@ -214,8 +220,7 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,ID3D12Resource* color,
   UINT cb[8]={m_flow.w,m_flow.h,renderSize.w,renderSize.h,0,0,1,0};
   cmd->SetPipelineState(m_lumaPso.Get());
   setTable(cmd,gpu,m_stride,0); cmd->SetComputeRoot32BitConstants(1,8,cb,0);
-  transition(cmd,color,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-  transition(cmd,m_currLuma.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // Color is already in a combined SRV state from main.cpp; compute SRV reads are valid there.
   cmd->Dispatch((m_flow.w+7)/8,(m_flow.h+7)/8,1);
 
   if(!reset&&m_hasHistory){
@@ -236,7 +241,7 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,ID3D12Resource* color,
     transition(cmd,m_refined.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     transition(cmd,fullResMv,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     cb[0]=renderSize.w;cb[1]=renderSize.h;
-    cmd->SetPipelineState(m_upPso.Get());setTable(cmd,gpu,m_stride,0);
+    cmd->SetPipelineState(m_upPso.Get());setTable(cmd,gpu,m_stride,7);
     cmd->SetComputeRoot32BitConstants(1,8,cb,0);
     cmd->Dispatch((renderSize.w+7)/8,(renderSize.h+7)/8,1);
     transition(cmd,fullResMv,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -262,8 +267,8 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,ID3D12Resource* color,
 }
 
 void FastMv::clearOutput(ID3D12GraphicsCommandList* cmd,ID3D12Resource* full){
-  auto cpu=m_heap->GetCPUDescriptorHandleForHeapStart();cpu.ptr+=6ull*m_stride;
-  auto gpu=m_heap->GetGPUDescriptorHandleForHeapStart();gpu.ptr+=6ull*m_stride;
+  auto cpu=m_heap->GetCPUDescriptorHandleForHeapStart();cpu.ptr+=10ull*m_stride;
+  auto gpu=m_heap->GetGPUDescriptorHandleForHeapStart();gpu.ptr+=10ull*m_stride;
   UINT z[4]={0,0,0,0};
   cmd->ClearUnorderedAccessViewUint(gpu,cpu,full,z,0,nullptr);
 }
