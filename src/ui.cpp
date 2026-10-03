@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "overlay.h"
 #include <windowsx.h>
 #include <algorithm>
 #include <cstring>
@@ -424,6 +425,7 @@ void setOverlayOpen(bool open)
     return;
   }
   g_overlayOpen = open;
+  overlaySetOpen(open);
 
   if (g_overlayHud && IsWindow(g_overlayHud)) {
     ShowWindow(g_overlayHud, open ? SW_SHOWNOACTIVATE : SW_HIDE);
