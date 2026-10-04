@@ -4,6 +4,7 @@
 #include "amdof.h"
 #include "fastmv.h"
 #include "ui.h"
+#include "overlay.h"
 #include "target.h"
 #include <windows.h>
 #include <shellapi.h>
@@ -182,6 +183,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
+    bool fsrEnabled = fsrOk;
     if (cliMode && hasConsole()) {
       if (fsrOk) printCli(L"FSR OK: " + fsr.lastError());
       else       printCli(L"FSR FAIL (raw capture only): " + fsr.lastError());
@@ -200,14 +202,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         fastmv.init(gfx.device(), render);
     }
 
-    HWND hud = spec.noOverlay ? nullptr : createHud(inst, out);
-    setOverlayHud(hud);
-    setOverlayOpen(false); // Steam-style: hidden until overlay key
+    overlayInit(inst, out);
+    overlaySetFsrEnabled(fsrEnabled);
+    setOverlayHud(nullptr);
+    setOverlayOpen(false);
     setStatus(out, label.c_str());
 
     bool reset = true, running = true;
     bool stopLatched = false;
     float fps = 0;
+    Size lastCs{};
     LARGE_INTEGER freq, last, now;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&last);
@@ -227,7 +231,27 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
+      if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
       drawCursor();
+
+      // Take screenshot if requested — do this BEFORE cap.acquire so it
+      // works even when no new frame arrived.  Uses the last captured
+      // texture which persists between frames.
+      if (overlayConsumeScreenshot()) cap.saveScreenshot(overlayScreenshotPath(), cap.totalFrames());
+
+      // Single QPC per frame — measures full frame time (previous-top to
+      // current-top).  Both the FPS overlay and the FSR dt use this value.
+      // The previous code had a second QPC after cap.acquire which measured
+      // only the render portion, making the displayed FPS incorrect.
+      {
+        QueryPerformanceCounter(&now);
+        float ms = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
+        last = now;
+        float f = (ms > 0.001f) ? (1000.0f / ms) : 0.0f;
+        fps = f;
+        Size csForOverlay = lastCs.w ? lastCs : render;
+        overlayUpdate(f, ms, csForOverlay, display);
+      }
 
       // If the target (game) window is gone, quit.  This happens when the
       // game exits — NRLive should not keep running with a dead target.
@@ -254,14 +278,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
+      lastCs = cs;
       setScaleSizes(cs, display);
       gfx.ensureAuxTextures(cs);
 
-      QueryPerformanceCounter(&now);
-      float ms = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
-      last = now;
-      float dt = std::clamp(ms, 1.0f, 100.0f);
-      fps = (ms > 0.001f) ? (1000.0f / ms) : 0.0f;
+      // dt for FSR — use the frame ms from the top-of-loop QPC (stored in fps)
+      float dt = std::clamp(1000.0f / (fps > 0.001f ? fps : 60.0f), 1.0f, 100.0f);
 
       gfx.begin();
       auto* cmd = gfx.cmd();
@@ -273,7 +295,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       ID3D12Resource* presentSrc = color.Get();
       bool usedFsr = false;
 
-      if (fsrOk && depth && mv && upscale) {
+      if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
         //   color:   COMMON  -> PS|NPS   (FSR & AMDOF read as SRV)
         //   depth:   UAV     -> PS|NPS   (FSR reads as SRV)
@@ -396,7 +418,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       hi.status = L"frames=" + std::to_wstring(cap.totalFrames()) +
                   (usedFsr ? L" FSR" : L" blit") +
                   L" | mv=" + spec.motionModeText + L" | " + spec.stopHotkeyText + L"=quit | " + spec.overlayHotkeyText + L"=overlay | bypass=" + (spec.bindBypassText.empty() ? std::wstring(L"default") : spec.bindBypassText);
-      updateHud(hud, hi);
+      updateHud(nullptr, hi);
     }
 
     // IMPORTANT: drain the GPU before tearing down any D3D12 resources.
@@ -409,6 +431,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     fastmv.shutdown();
     amdof.shutdown();
     fsr.shutdown();
+    overlayShutdown();
     cap.stop();
     if (hk) UnregisterHotKey(nullptr, kStopId);
   } catch (const std::exception& e) {

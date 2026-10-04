@@ -32,6 +32,7 @@ public:
   bool acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue);
   ID3D12Fence* fence() const { return m_fence.Get(); }
   void release(uint64_t) {} // no-op; Magpie does not need this
+  bool saveScreenshot(const std::wstring& folder, uint64_t frameIndex);
   void stop();
   const std::wstring& lastError() const { return m_error; }
   uint64_t totalFrames() const { return m_frameCount.load(); }
