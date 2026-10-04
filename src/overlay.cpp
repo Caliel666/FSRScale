@@ -21,23 +21,33 @@ static constexpr int FT_SAMPLES = 200;     // frametime graph ring buffer size
 static constexpr int FT_HEIGHT  = 50;      // frametime graph height (px)
 static constexpr int FT_RANGE   = 50;      // frametime graph Y range (ms)
 
-// MangoHud colors
-static constexpr COLORREF C_BG       = RGB(2,2,2);       // near-black background
-static constexpr COLORREF C_GPU      = RGB(46,151,98);   // #2E9762 green
-static constexpr COLORREF C_CPU      = RGB(46,151,203);  // #2E97CB blue
-static constexpr COLORREF C_ENGINE   = RGB(235,91,91);   // #EB5B5B red
-static constexpr COLORREF C_TEXT     = RGB(255,255,255); // #FFFFFF white
-static constexpr COLORREF C_FT       = RGB(0,255,0);     // #00FF00 green graph
-static constexpr COLORREF C_OUTLINE  = RGB(0,0,0);       // #000000 black outline
+// Design language: dark charcoal (#1A1A1D) with red brand accent (#DC2626)
+// Inspired by the AMD-NR ReShade Installer design.
+// Discord/Electron aesthetic — flat with subtle depth, no heavy borders.
 
-// Steam dark theme + red highlights
-static constexpr COLORREF C_BAR_BG   = RGB(24,25,31);
-static constexpr COLORREF C_BTN      = RGB(38,40,48);
-static constexpr COLORREF C_BTN_HOT  = RGB(48,50,60);
-static constexpr COLORREF C_BTN_ACT  = RGB(55,28,31);   // red-tinted
-static constexpr COLORREF C_ACCENT   = RGB(255,92,92);   // red highlight
-static constexpr COLORREF C_BTN_TXT  = RGB(220,220,225);
-static constexpr COLORREF C_SET_BG   = RGB(28,29,36);
+// ── Colors ───────────────────────────────────────────────────────────────
+static constexpr COLORREF C_WIN_BG    = RGB(26,26,29);     // #1A1A1D main bg
+static constexpr COLORREF C_SIDEBAR   = RGB(20,20,22);     // #141416 darker
+static constexpr COLORREF C_CARD      = RGB(36,36,40);      // #242428 elevated
+static constexpr COLORREF C_CARD_ALT  = RGB(30,30,33);     // #1E1E21 content area
+static constexpr COLORREF C_HOVER     = RGB(63,63,70);      // #3F3F46 hover bg
+static constexpr COLORREF C_BORDER    = RGB(63,63,70);      // #3F3F46 borders
+static constexpr COLORREF C_INPUT_BG  = RGB(38,38,44);      // #26262C input fields
+static constexpr COLORREF C_BTN       = RGB(42,42,46);      // #2A2A2E ghost btn
+static constexpr COLORREF C_BTN_HOT   = RGB(63,63,70);      // #3F3F46 ghost hover
+static constexpr COLORREF C_RED       = RGB(220,38,38);     // #DC2626 brand red
+static constexpr COLORREF C_RED_HOT    = RGB(239,68,68);     // #EF4444 hover
+static constexpr COLORREF C_RED_TINT  = RGB(58,44,47);      // #3A2C2F active/red tint
+static constexpr COLORREF C_GREEN     = RGB(34,197,94);     // #22C55E success
+static constexpr COLORREF C_GREEN_DOT  = RGB(74,222,128);   // #4ADE80 bright green
+static constexpr COLORREF C_AMBER     = RGB(245,158,11);    // #F59E0B info/warning
+static constexpr COLORREF C_TEXT      = RGB(232,232,232);   // #E8E8E8 primary text
+static constexpr COLORREF C_TEXT_DIM  = RGB(139,139,139);   // #8B8B8B secondary text
+static constexpr COLORREF C_TEXT_MUTED= RGB(107,107,107);   // #6B6B6B tertiary
+
+// MangoHud FPS overlay colors (unchanged — these are MangoHud defaults)
+static constexpr COLORREF C_BG       = RGB(2,2,2);       // FPS near-black bg
+static constexpr COLORREF C_OUTLINE  = RGB(0,0,0);       // text outline
 
 // ── State ─────────────────────────────────────────────────────────────────
 static const wchar_t* UI_CLS   = L"NRLiveOverlayUI";
@@ -145,7 +155,7 @@ static void roundRect(HDC dc, RECT r, int radius, HBRUSH br) {
 // ── Button icon drawing ───────────────────────────────────────────────────
 static void drawBtnIcon(HDC dc, RECT r, int kind, bool active) {
   int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
-  COLORREF c = active ? C_ACCENT : C_BTN_TXT;
+  COLORREF c = active ? C_RED : C_TEXT_DIM;
   HFONT f = makeFont(11, true);
   auto old = (HFONT)SelectObject(dc, f);
   SetBkMode(dc, TRANSPARENT);
@@ -165,7 +175,8 @@ static void drawBtnIcon(HDC dc, RECT r, int kind, bool active) {
     HPEN p = CreatePen(PS_SOLID, 2, c);
     auto op = (HPEN)SelectObject(dc, p);
     auto ob = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
-    RoundRect(dc, cx - 14, cy - 9, cx + 14, cy + 9, 4, 4);
+    HBRUSH ob2 = (HBRUSH)GetStockObject(NULL_BRUSH);
+    roundRect(dc, {cx - 14, cy - 9, cx + 14, cy + 9}, 6, ob2);
     Ellipse(dc, cx - 6, cy - 5, cx + 6, cy + 6);
     MoveToEx(dc, cx - 10, cy - 9, nullptr); LineTo(dc, cx - 6, cy - 13);
     SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(p);
@@ -197,15 +208,18 @@ static RECT btnRect(int i) {
 // ── Top bar paint ─────────────────────────────────────────────────────────
 static void paintTopBar(HWND h, HDC dc) {
   RECT rc{}; GetClientRect(h, &rc);
-  HBRUSH bg = CreateSolidBrush(C_BAR_BG);
+  // Main background — dark charcoal
+  HBRUSH bg = CreateSolidBrush(C_WIN_BG);
   FillRect(dc, &rc, bg); DeleteObject(bg);
 
   for (int i = 0; i < 4; ++i) {
     RECT b = btnRect(i);
     bool active = (i == 0 && g_fsr) || (i == 1 && g_fpsVisible) || (i == 3 && IsWindowVisible(g_settings));
     bool hot = (g_hoverBtn == i);
-    HBRUSH br = CreateSolidBrush(active ? C_BTN_ACT : (hot ? C_BTN_HOT : C_BTN));
-    roundRect(dc, b, 10, br); DeleteObject(br);
+    // Active = red tint, hot = lighter, default = ghost button
+    COLORREF btnCol = active ? C_RED_TINT : (hot ? C_BTN_HOT : C_BTN);
+    HBRUSH br = CreateSolidBrush(btnCol);
+    roundRect(dc, b, 6, br); DeleteObject(br);
     drawBtnIcon(dc, b, i, active);
   }
 }
@@ -214,11 +228,11 @@ static void paintTopBar(HWND h, HDC dc) {
 static void paintFps(HWND h, HDC dc) {
   RECT rc{}; GetClientRect(h, &rc);
 
-  // Background
+  // Only draw the background fill when background is enabled.
+  // The window alpha (SetLayeredWindowAttributes) controls overall
+  // transparency — when background is OFF we set alpha=255 and don't
+  // draw any fill, so only the text pixels are visible.
   if (g_cfg.background) {
-    int alpha = (int)(g_cfg.background_alpha * 255);
-    // Use a solid brush at near-black; true alpha blending requires
-    // UpdateLayeredWindow, but for a simple overlay a dark brush works.
     HBRUSH bg = CreateSolidBrush(C_BG);
     FillRect(dc, &rc, bg); DeleteObject(bg);
   }
@@ -228,61 +242,56 @@ static void paintFps(HWND h, HDC dc) {
   int fs = g_cfg.fontSize;
   int smFont = (int)(fs * 0.55);
 
-  // FPS row: engine label (red) + FPS number (white) + "FPS" suffix (smFont)
+  // FPS row: engine label (config color) + FPS number (config color) + suffixes
   if (g_cfg.fps) {
     wchar_t buf[64];
     // Engine label
-    drawText(dc, L"NRLive", pad, y, smFont, C_ENGINE, g_cfg.text_outline);
+    drawText(dc, L"NRLive", pad, y, smFont, g_cfg.engine_color, g_cfg.text_outline);
     // FPS number
     swprintf_s(buf, L"%.0f", g_lastFps);
-    int labelW = 60;
-    drawText(dc, buf, pad + labelW, y, fs, C_TEXT, g_cfg.text_outline);
+    int labelW = (int)(smFont * 4.5);  // scale label width with font
+    drawText(dc, buf, pad + labelW, y, fs, g_cfg.text_color, g_cfg.text_outline);
     // "FPS" suffix
-    int fpsW = buf[0] ? (int)wcslen(buf) * (fs * 0.6) : 0;
-    drawText(dc, L"FPS", pad + labelW + fpsW + 4, y + (fs - smFont), smFont, C_TEXT, g_cfg.text_outline);
+    int numW = buf[0] ? (int)(wcslen(buf) * (fs * 0.6)) : 0;
+    drawText(dc, L"FPS", pad + labelW + numW + 4, y + (fs - smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
     // Frametime value
     if (g_cfg.frametime) {
+      int ftX = pad + labelW + numW + (int)(smFont * 4.5);  // scale spacing
       swprintf_s(buf, L"%.1f", g_lastMs);
-      drawText(dc, buf, pad + labelW + fpsW + 40, y, fs, C_TEXT, g_cfg.text_outline);
-      drawText(dc, L"ms", pad + labelW + fpsW + 40 + (int)(wcslen(buf) * fs * 0.6) + 2, y + (fs - smFont), smFont, C_TEXT, g_cfg.text_outline);
+      drawText(dc, buf, ftX, y, fs, g_cfg.text_color, g_cfg.text_outline);
+      drawText(dc, L"ms", ftX + (int)(wcslen(buf) * fs * 0.6) + 2, y + (fs - smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
     }
-    y += fs + 6;
+    y += fs + 8;
   } else if (g_cfg.frametime) {
-    // Just frametime without FPS
     wchar_t buf[64]; swprintf_s(buf, L"%.1f ms", g_lastMs);
-    drawText(dc, buf, pad, y, smFont, C_TEXT, g_cfg.text_outline);
-    y += smFont + 6;
+    drawText(dc, buf, pad, y, smFont, g_cfg.text_color, g_cfg.text_outline);
+    y += smFont + 8;
   }
 
   // Frametime graph
   int graphH = g_cfg.frame_timing ? FT_HEIGHT : 0;
   int graphW = rc.right - pad * 2;
   if (graphH > 0 && graphW > 10) {
-    // Header: "Frametime" (red) + min/max (white, smFont)
+    // Header: "Frametime" (config color) + min/max (config color)
     {
       wchar_t buf[80];
-      drawText(dc, L"Frametime", pad, y, smFont, C_ENGINE, g_cfg.text_outline);
+      drawText(dc, L"Frametime", pad, y, smFont, g_cfg.engine_color, g_cfg.text_outline);
       swprintf_s(buf, L"min: %.1fms  max: %.1fms", g_ftMin, g_ftMax);
-      int hdrW = 100;
-      drawText(dc, buf, pad + hdrW, y, smFont, C_TEXT, g_cfg.text_outline);
+      int hdrW = (int)(smFont * 5);
+      drawText(dc, buf, pad + hdrW, y, smFont, g_cfg.text_color, g_cfg.text_outline);
       y += smFont + 4;
     }
 
-    // Graph area
-    RECT gr{pad, y, pad + graphW, y + graphH};
-    // Draw the polyline
-    HPEN pen = CreatePen(PS_SOLID, 1, C_FT); // MangoHud uses 1.5 but GDI only does int
+    // Graph area — polyline in config frametime_color
+    HPEN pen = CreatePen(PS_SOLID, 1, g_cfg.frametime_color);
     auto op = (HPEN)SelectObject(dc, pen);
     auto ob = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
-    // No background fill for the graph (transparent, MangoHud style)
     bool first = true;
-    int prevX = 0, prevY = 0;
     for (int i = 0; i < FT_SAMPLES; ++i) {
       int idx = (g_ftIdx + i) % FT_SAMPLES;
       float v = g_ftBuf[idx];
       if (v <= 0) v = 0;
       if (v > FT_RANGE) v = FT_RANGE;
-      // Non-linear (sqrt) transform for more resolution at low frametimes
       float nv = sqrtf(v / FT_RANGE);
       int px = pad + (int)((float)i / (FT_SAMPLES - 1) * graphW);
       int py = y + graphH - (int)(nv * graphH);
@@ -296,31 +305,29 @@ static void paintFps(HWND h, HDC dc) {
   // Resolution
   if (g_cfg.resolution) {
     wchar_t buf[64]; swprintf_s(buf, L"%ux%u → %ux%u", g_cap.w, g_cap.h, g_out.w, g_out.h);
-    drawText(dc, buf, pad, y, smFont, C_TEXT, g_cfg.text_outline);
+    drawText(dc, buf, pad, y, smFont, g_cfg.text_color, g_cfg.text_outline);
   }
-  // NOTE: auto-resize moved to overlayUpdate() — calling SetWindowPos
-  // during WM_PAINT causes a paint loop and flickering.
 }
 
 // ── Settings panel paint ──────────────────────────────────────────────────
 static void paintSettings(HWND h, HDC dc) {
   RECT rc{}; GetClientRect(h, &rc);
-  HBRUSH bg = CreateSolidBrush(C_SET_BG);
+  HBRUSH bg = CreateSolidBrush(C_WIN_BG);
   FillRect(dc, &rc, bg); DeleteObject(bg);
 
   // Title bar (draggable area)
-  HBRUSH titleBar = CreateSolidBrush(RGB(20,21,27));
+  HBRUSH titleBar = CreateSolidBrush(C_SIDEBAR);
   RECT tr{0, 0, rc.right, 48};
   FillRect(dc, &tr, titleBar); DeleteObject(titleBar);
 
   HFONT fTitle = makeFont(18, true);
   HFONT old = (HFONT)SelectObject(dc, fTitle);
   SetBkMode(dc, TRANSPARENT);
-  SetTextColor(dc, RGB(245,245,248));
+  SetTextColor(dc, C_TEXT);
   RECT r1{24, 12, rc.right - 24, 42};
   DrawTextW(dc, L"NRLive Settings", -1, &r1, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
   // Drag hint
-  SetTextColor(dc, RGB(100,100,110));
+  SetTextColor(dc, C_TEXT_MUTED);
   HFONT fHint = makeFont(10, false);
   SelectObject(dc, fHint);
   RECT rDrag{rc.right - 120, 12, rc.right - 24, 42};
@@ -333,11 +340,11 @@ static void paintSettings(HWND h, HDC dc) {
   auto drawSection = [&](const wchar_t* title, int y) {
     HFONT f = makeFont(13, true);
     auto o = (HFONT)SelectObject(dc, f);
-    SetTextColor(dc, C_ACCENT);
+    SetTextColor(dc, C_RED);
     RECT sr{24, y, rc.right - 24, y + 20};
     DrawTextW(dc, title, -1, &sr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     // Underline
-    HPEN pen = CreatePen(PS_SOLID, 1, RGB(50,52,60));
+    HPEN pen = CreatePen(PS_SOLID, 1, C_CARD_ALT);
     auto op = (HPEN)SelectObject(dc, pen);
     MoveToEx(dc, 24, y + 22, nullptr);
     LineTo(dc, rc.right - 24, y + 22);
@@ -354,7 +361,7 @@ static void paintSettings(HWND h, HDC dc) {
   // Bottom hint
   HFONT fBottom = makeFont(10, false);
   old = (HFONT)SelectObject(dc, fBottom);
-  SetTextColor(dc, RGB(100,100,110));
+  SetTextColor(dc, C_TEXT_MUTED);
   RECT r4{24, rc.bottom - 28, rc.right - 24, rc.bottom - 8};
   DrawTextW(dc, L"Saved to scaleconfig.ini", -1, &r4, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
   SelectObject(dc, old);
@@ -382,8 +389,18 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         else if (i == 2) { g_screenshot = true; }
         else { // Settings toggle
-          if (IsWindowVisible(g_settings)) ShowWindow(g_settings, SW_HIDE);
-          else { SetWindowTextW(g_pathEdit, g_shotPath.c_str()); ShowWindow(g_settings, SW_SHOWNOACTIVATE); }
+          if (IsWindowVisible(g_settings)) {
+            ShowWindow(g_settings, SW_HIDE);
+          } else {
+            // Center settings panel on screen
+            int sw = GetSystemMetrics(SM_CXSCREEN);
+            int sh = GetSystemMetrics(SM_CYSCREEN);
+            int setW = 480, setH = 460;
+            SetWindowTextW(g_pathEdit, g_shotPath.c_str());
+            SetWindowPos(g_settings, HWND_TOPMOST, (sw - setW) / 2, (sh - setH) / 2,
+              setW, setH, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            InvalidateRect(g_settings, nullptr, TRUE);
+          }
         }
         InvalidateRect(h, nullptr, FALSE);
         UpdateWindow(h);  // force immediate repaint so button state updates NOW
@@ -453,9 +470,7 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       saveCfg();
       // Update FPS window alpha + repaint
       if (g_fps) {
-        int alpha = g_cfg.background ? (int)(g_cfg.background_alpha * 255) : 0;
-        if (!g_cfg.background) alpha = 255; // no background = fully opaque text
-        else alpha = std::max(180, alpha); // keep text readable
+        int alpha = g_cfg.background ? (int)(g_cfg.background_alpha * 255) : 255;
         SetLayeredWindowAttributes(g_fps, 0, alpha, LWA_ALPHA);
         InvalidateRect(g_fps, nullptr, FALSE);
       }
@@ -504,7 +519,6 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       // Apply alpha to the FPS window immediately
       if (g_fps) {
         int alpha = g_cfg.background ? (int)(g_cfg.background_alpha * 255) : 255;
-        if (g_cfg.background) alpha = std::max(180, alpha);
         SetLayeredWindowAttributes(g_fps, 0, alpha, LWA_ALPHA);
         InvalidateRect(g_fps, nullptr, FALSE);
       }
@@ -605,7 +619,6 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   if (g_fps) {
     // Apply initial background alpha
     int alpha = g_cfg.background ? (int)(g_cfg.background_alpha * 255) : 255;
-    if (g_cfg.background) alpha = std::max(180, alpha);
     SetLayeredWindowAttributes(g_fps, 0, alpha, LWA_ALPHA);
   }
 
@@ -627,14 +640,11 @@ void overlaySetOpen(bool open) {
   g_open = open;
   if (g_ui) {
     if (open) {
-      // Show the top bar first (ShowWindow is more reliable than
-      // SetWindowPos SWP_SHOWWINDOW for a window that's never been shown)
       ShowWindow(g_ui, SW_SHOWNOACTIVATE);
-      // Position the top bar at top-center of the output window
       RECT o{}; if (GetWindowRect(g_output, &o)) {
         int barW = BAR_PAD * 2 + 4 * BTN_SIZE + 3 * BTN_GAP;
         int screenW = o.right - o.left;
-        int cx = o.left + (screenW - barW) / 2;  // centered
+        int cx = o.left + (screenW - barW) / 2;
         SetWindowPos(g_ui, HWND_TOPMOST, cx, o.top + 16, barW, BAR_PAD * 2 + BTN_SIZE,
           SWP_NOACTIVATE | SWP_SHOWWINDOW);
       }
@@ -644,19 +654,9 @@ void overlaySetOpen(bool open) {
       ShowWindow(g_ui, SW_HIDE);
     }
   }
-  if (g_settings) {
-    if (open) {
-      // Position settings below the top bar
-      RECT o{}; if (GetWindowRect(g_output, &o)) {
-        SetWindowPos(g_settings, HWND_TOPMOST, o.left + 16, o.top + 16 + BAR_PAD * 2 + BTN_SIZE + 8,
-          520, 400, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-      }
-      InvalidateRect(g_settings, nullptr, TRUE);
-    } else {
-      ShowWindow(g_settings, SW_HIDE);
-    }
-  }
-  // FPS overlay persists after overlay closes — only hide if g_fpsVisible is false
+  // Settings panel: do NOT auto-show on overlay open.  Only show/hide
+  // via the Settings button click.  But always hide on overlay close.
+  if (!open && g_settings) ShowWindow(g_settings, SW_HIDE);
   updateFpsPos();
 }
 
