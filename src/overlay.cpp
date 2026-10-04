@@ -357,8 +357,7 @@ static void paintSettings(HWND h, HDC dc) {
   section(L"SCREENSHOT",326);
   // Slider labels/values are painted here; the native trackbars remain for interaction.
   drawText(dc,L"Font size",24,176,13,C_TEXT,false);
-  wchar_t b[32]; swprintf_s(b,L"%d",g_cfg.fontSize); drawText(dc,b,410,176,13,C_TEXT,false);
-  drawText(dc,L"Bg alpha",24,212,13,C_TEXT,false); swprintf_s(b,L"%d%%",(int)std::lround(g_cfg.background_alpha*100)); drawText(dc,b,405,212,13,C_TEXT,false);
+  drawText(dc,L"Bg alpha",24,212,13,C_TEXT,false);
   drawText(dc,L"Engine",24,248,12,C_DIM,false); drawText(dc,L"Text",130,248,12,C_DIM,false); drawText(dc,L"Graph",224,248,12,C_DIM,false);
   auto swatch=[&](int x,COLORREF col){HBRUSH br=CreateSolidBrush(col);RECT r{x,246,x+40,268};FillRect(dc,&r,br);DeleteObject(br);HPEN p=CreatePen(PS_SOLID,1,C_HOVER);auto op=(HPEN)SelectObject(dc,p);auto ob=(HBRUSH)SelectObject(dc,GetStockObject(NULL_BRUSH));Rectangle(dc,r.left,r.top,r.right,r.bottom);SelectObject(dc,ob);SelectObject(dc,op);DeleteObject(p);};
   swatch(80,g_cfg.engine_color);swatch(174,g_cfg.text_color);swatch(268,g_cfg.frametime_color);
@@ -472,11 +471,15 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   if (m == WM_COMMAND) {
     if (LOWORD(w) >= 101 && LOWORD(w) <= 105) {
-      if (LOWORD(w) == 101) g_cfg.fps = (IsDlgButtonChecked(h, 101) == BST_CHECKED);
-      if (LOWORD(w) == 102) g_cfg.frametime = (IsDlgButtonChecked(h, 102) == BST_CHECKED);
-      if (LOWORD(w) == 103) g_cfg.frame_timing = (IsDlgButtonChecked(h, 103) == BST_CHECKED);
-      if (LOWORD(w) == 104) g_cfg.resolution = (IsDlgButtonChecked(h, 104) == BST_CHECKED);
-      if (LOWORD(w) == 105) g_cfg.background = (IsDlgButtonChecked(h, 105) == BST_CHECKED);
+      // These are BS_OWNERDRAW controls, so Windows does not maintain a
+      // checkbox state for us. Toggle our actual config state directly.
+      if (LOWORD(w) == 101) g_cfg.fps = !g_cfg.fps;
+      if (LOWORD(w) == 102) g_cfg.frametime = !g_cfg.frametime;
+      if (LOWORD(w) == 103) g_cfg.frame_timing = !g_cfg.frame_timing;
+      if (LOWORD(w) == 104) g_cfg.resolution = !g_cfg.resolution;
+      if (LOWORD(w) == 105) g_cfg.background = !g_cfg.background;
+      InvalidateRect(h, nullptr, FALSE);
+      if (g_fpsVisible) { updateFpsPos(); renderFpsLayered(); }
       saveCfg();
       if (g_fpsVisible) updateFpsPos();
     }
@@ -573,11 +576,14 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     CheckDlgButton(g_settings, 103, g_cfg.frame_timing ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 104, g_cfg.resolution ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 105, g_cfg.background ? BST_CHECKED : BST_UNCHECKED);
+    SetWindowTextW(g_pathEdit, g_shotPath.c_str());
     ShowWindow(g_settings, SW_HIDE);
   }
 
   if (g_fps) {
-    SetLayeredWindowAttributes(g_fps, 0, 255, LWA_ALPHA);
+    // Do NOT call SetLayeredWindowAttributes here. UpdateLayeredWindow owns
+    // the per-pixel alpha for this window; mixing the two APIs breaks the
+    // layered surface and results in an opaque/black HUD.
     if (g_fpsVisible) ShowWindow(g_fps, SW_SHOWNOACTIVATE);
   }
 
