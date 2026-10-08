@@ -1,11 +1,12 @@
 #include "frametrace.h"
+#include <filesystem>
 #include <iomanip>
 
 bool FrameTrace::open(const std::wstring& path)
 {
-  m_file.open(path, std::ios::out | std::ios::trunc);
+  m_file.open(std::filesystem::path(path), std::ios::out | std::ios::trunc);
   if (!m_file.is_open()) return false;
-  m_file << "frame,loop_ms,acquire_cpu_ms,render_present_cpu_ms,render_width,render_height,display_width,display_height,motion_mode,fsr_used\n";
+  m_file << "frame,capture_interval_ms,acquire_cpu_ms,render_present_cpu_ms,render_width,render_height,display_width,display_height,motion_mode,fsr_used\n";
   m_file << std::fixed << std::setprecision(4);
   return true;
 }
