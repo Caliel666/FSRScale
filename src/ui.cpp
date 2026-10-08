@@ -64,7 +64,21 @@ static void clipCursorToOutput(bool enable)
   ClientToScreen(h, &tl);
   ClientToScreen(h, &br);
   RECT screen{ tl.x, tl.y, br.x, br.y };
-  ClipCursor(&screen);
+  if (!ClipCursor(&screen)) return;
+
+  // Some games repeatedly clear the global ClipCursor rectangle. Reasserting
+  // it each render-loop iteration is normally enough; if the pointer already
+  // escaped between those calls, clamp it back into the valid client pixels.
+  // This also avoids a one-frame cursor jump when focus changes.
+  POINT cursor{};
+  if (GetCursorPos(&cursor)) {
+    const LONG maxX = std::max(screen.left, screen.right - 1);
+    const LONG maxY = std::max(screen.top, screen.bottom - 1);
+    const LONG x = std::clamp(cursor.x, screen.left, maxX);
+    const LONG y = std::clamp(cursor.y, screen.top, maxY);
+    if (x != cursor.x || y != cursor.y)
+      SetCursorPos(x, y);
+  }
 }
 
 // Clip cursor to the TARGET (game) window's CLIENT-AREA screen rect.
