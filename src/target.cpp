@@ -349,6 +349,8 @@ std::wstring targetUsage()
         L"                                  OptiScaler/ReShade menu keys (not sent to game).\n"
         L"                                  Default: Home,Insert,End,PageUp,PageDown.\n"
         L"  NRLive.exe --overlaykey ctrl+home\n"
+        L"  NRLive.exe --trace frame-trace.csv\n"
+        L"                                  Write per-frame CPU/capture/present timing to CSV.\n"
         L"                                  Toggle NRLive HUD overlay (Steam-style).\n"
         L"                                  Default: Ctrl+Home. When open, mouse is held\n"
         L"                                  by NRLive and not forwarded to the game.\n"
@@ -442,6 +444,9 @@ bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& e
                 error = L"invalid motion mode: " + value + L" (valid: amdof, fast)";
                 return false;
             }
+        } else if (opt == L"--trace" || opt == L"-trace") {
+            if (!need(value)) return false;
+            spec.tracePath = value;
         } else if (opt == L"--front" || opt == L"-front") {
             spec.front = true;
             explicitTarget = true;
