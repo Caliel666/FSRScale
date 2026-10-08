@@ -204,6 +204,12 @@ float patchCost(int2 p, float2 motion, int2 last, float2 invSize)
 void main(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= size.x || id.y >= size.y) return;
+    if ((flags & 1) == 0)
+    {
+        outMotion[id.xy] = float2(0,0);
+        outReactive[id.xy] = 0.0;
+        return;
+    }
 
     const int2 p = int2(id.xy);
     const int2 last = int2(size)-1;
