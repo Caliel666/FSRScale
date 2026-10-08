@@ -9,7 +9,7 @@
 class FrameTrace {
 public:
   bool open(const std::wstring& path);
-  void record(uint64_t frame, double loopMs, double acquireMs, double renderCpuMs,
+  void record(uint64_t frame, double captureIntervalMs, double acquireMs, double renderCpuMs,
               Size render, Size display, const std::wstring& motionMode, bool fsrUsed);
 private:
   std::ofstream m_file;
