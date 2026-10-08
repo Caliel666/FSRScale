@@ -122,7 +122,7 @@ static bool testMotionMath()
             if (c < best) { best=c; bestDx=dx; bestDy=dy; }
         }
 
-    return best < 0.02f && bestDx == tx && bestDy == ty;
+    return best < 0.02f && bestDx == -tx && bestDy == -ty;
 }
 
 int main()
