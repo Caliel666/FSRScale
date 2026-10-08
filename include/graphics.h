@@ -22,6 +22,7 @@ public:
   ID3D12Resource* upscaleOutput() const { return m_upscaleOutput.Get(); }
   ID3D12Resource* dummyDepth() const { return m_dummyDepth.Get(); }
   ID3D12Resource* motionVectors() const { return m_motionVectors.Get(); }
+  ID3D12Resource* reactiveMask() const { return m_reactiveMask.Get(); }
   D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle() const {
     D3D12_CPU_DESCRIPTOR_HANDLE h = m_rtvBase;
     h.ptr += (SIZE_T)m_index * m_rtvStride;
@@ -79,6 +80,9 @@ private:
   ComPtr<ID3D12Resource> m_upscaleOutput;
   ComPtr<ID3D12Resource> m_dummyDepth;
   ComPtr<ID3D12Resource> m_motionVectors;
+  ComPtr<ID3D12Resource> m_reactiveMask;
+  ComPtr<ID3D12DescriptorHeap> m_clearGpuHeap;
+  ComPtr<ID3D12DescriptorHeap> m_clearCpuHeap;
 
   // Fullscreen stretch blit
   ComPtr<ID3D12RootSignature> m_blitRs;
