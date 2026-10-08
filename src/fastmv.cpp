@@ -142,11 +142,11 @@ bool FastMv::init(ID3D12Device* device, Size resolution)
 
 bool FastMv::ensureResources(Size rs)
 {
-    if (m_currLuma[0] && m_render.w == rs.w && m_render.h == rs.h)
+    if (m_luma[0][0] && m_render.w == rs.w && m_render.h == rs.h)
         return true;
 
-    for (auto& r : m_currLuma) r.Reset();
-    for (auto& r : m_prevLuma) r.Reset();
+    for (auto& level : m_luma)
+        for (auto& r : level) r.Reset();
     for (auto& r : m_grid) r.Reset();
     m_filtered.Reset();
 
@@ -196,12 +196,10 @@ bool FastMv::ensureResources(Size rs)
             nullptr, IID_PPV_ARGS(&out)));
     };
 
-    for (int k = 0; k < m_levels; ++k)
-    {
-        if (!make(m_currLuma[k], m_lw[k], m_lh[k], DXGI_FORMAT_R16_FLOAT) ||
-            !make(m_prevLuma[k], m_lw[k], m_lh[k], DXGI_FORMAT_R16_FLOAT))
-            return false;
-    }
+    for (int b = 0; b < 2; ++b)
+        for (int k = 0; k < m_levels; ++k)
+            if (!make(m_luma[b][k], m_lw[k], m_lh[k], DXGI_FORMAT_R16_FLOAT))
+                return false;
 
     for (int k = 1; k < m_levels; ++k)
         if (!make(m_grid[k], m_gw[k], m_gh[k], DXGI_FORMAT_R16G16_FLOAT))
@@ -316,7 +314,7 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
 
     // 1. Full-resolution luminance.
     {
-        transition(cmd, m_currLuma[cur].Get(),
+        transition(cmd, m_luma[cur][0].Get(),
                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
@@ -326,14 +324,14 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
         ID3D12Resource* s[3] = { color, nullptr, nullptr };
         DXGI_FORMAT sf[3] = { DXGI_FORMAT_B8G8R8A8_UNORM,
                               DXGI_FORMAT_R16_FLOAT, DXGI_FORMAT_R16G16_FLOAT };
-        ID3D12Resource* u[2] = { m_currLuma[cur].Get(), nullptr };
+        ID3D12Resource* u[2] = { m_luma[cur][0].Get(), nullptr };
         DXGI_FORMAT uf[2] = { DXGI_FORMAT_R16_FLOAT, DXGI_FORMAT_R16_FLOAT };
         dispatchPass(cmd, m_lumaPso.Get(), s, sf, u, uf,
                      reinterpret_cast<const uint32_t*>(&c),
                      sizeof(c) / sizeof(uint32_t),
                      renderSize.w, renderSize.h, cursor);
 
-        transition(cmd, m_currLuma[cur].Get(),
+        transition(cmd, m_luma[cur][0].Get(),
                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
@@ -341,17 +339,17 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
     // 2. Native -> half -> quarter ... brightness pyramid.
     for (int k = 1; k < m_levels; ++k)
     {
-        transition(cmd, m_currLuma[cur][k].Get(),
+        transition(cmd, m_luma[cur][k].Get(),
                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
         auto c = makeConstants(m_lw[k], m_lh[k],
                                m_lw[k], m_lh[k],
                                m_lw[k-1], m_lh[k-1], 0, 0);
-        ID3D12Resource* s[3] = { m_currLuma[cur][k-1].Get(), nullptr, nullptr };
+        ID3D12Resource* s[3] = { m_luma[cur][k-1].Get(), nullptr, nullptr };
         DXGI_FORMAT sf[3] = { DXGI_FORMAT_R16_FLOAT,
                               DXGI_FORMAT_R16_FLOAT, DXGI_FORMAT_R16G16_FLOAT };
-        ID3D12Resource* u[2] = { m_currLuma[cur][k].Get(), nullptr };
+        ID3D12Resource* u[2] = { m_luma[cur][k].Get(), nullptr };
         DXGI_FORMAT uf[2] = { DXGI_FORMAT_R16_FLOAT, DXGI_FORMAT_R16_FLOAT };
 
         dispatchPass(cmd, m_downPso.Get(), s, sf, u, uf,
@@ -359,7 +357,7 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
                      sizeof(c) / sizeof(uint32_t),
                      m_lw[k], m_lh[k], cursor);
 
-        transition(cmd, m_currLuma[cur][k].Get(),
+        transition(cmd, m_luma[cur][k].Get(),
                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
@@ -384,8 +382,8 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
                 hasCoarse ? 1u : 0u);
 
             ID3D12Resource* s[3] = {
-                m_currLuma[cur][k].Get(),
-                m_prevLuma[prev][k].Get(),
+                m_luma[cur][k].Get(),
+                m_luma[prev][k].Get(),
                 hasCoarse ? m_grid[k+1].Get() : nullptr
             };
             DXGI_FORMAT sf[3] = {
@@ -450,8 +448,8 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
                                m_hasHistory ? 1u : 0u);
 
         ID3D12Resource* s[3] = {
-            m_currLuma[cur][0].Get(),
-            m_prevLuma[prev][0].Get(),
+            m_luma[cur][0].Get(),
+            m_luma[prev][0].Get(),
             m_hasHistory ? m_filtered.Get() : m_filtered.Get()
         };
         DXGI_FORMAT sf[3] = {
@@ -482,8 +480,8 @@ void FastMv::shutdown()
     m_hasHistory = false;
     m_current = 0;
 
-    for (auto& r : m_currLuma) r.Reset();
-    for (auto& r : m_prevLuma) r.Reset();
+    for (auto& level : m_luma)
+        for (auto& r : level) r.Reset();
     for (auto& r : m_grid) r.Reset();
     m_filtered.Reset();
 
