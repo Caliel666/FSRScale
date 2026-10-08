@@ -6,6 +6,7 @@
 #include "ui.h"
 #include "overlay.h"
 #include "target.h"
+#include "frametrace.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
@@ -164,6 +165,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
   setCaptureTarget(target);
   setScaleSizes(render, display);
 
+  FrameTrace trace;
+  if (!spec.tracePath.empty() && !trace.open(spec.tracePath)) {
+    const std::wstring msg = L"Could not open frame trace CSV: " + spec.tracePath;
+    if (cliMode && hasConsole()) printCli(msg);
+    else MessageBoxW(nullptr, msg.c_str(), L"NRLive", MB_ICONWARNING);
+  }
+
   try {
     Graphics gfx;
     if (!gfx.init(out, render, display)) throw 1;
@@ -243,14 +251,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       // current-top).  Both the FPS overlay and the FSR dt use this value.
       // The previous code had a second QPC after cap.acquire which measured
       // only the render portion, making the displayed FPS incorrect.
+      float loopMs = 0.0f;
       {
         QueryPerformanceCounter(&now);
-        float ms = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
+        loopMs = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
         last = now;
-        float f = (ms > 0.001f) ? (1000.0f / ms) : 0.0f;
+        float f = (loopMs > 0.001f) ? (1000.0f / loopMs) : 0.0f;
         fps = f;
         Size csForOverlay = lastCs.w ? lastCs : render;
-        overlayUpdate(f, ms, csForOverlay, display);
+        overlayUpdate(f, loopMs, csForOverlay, display);
       }
 
       // If the target (game) window is gone, quit.  This happens when the
@@ -268,6 +277,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       ComPtr<ID3D12Resource> color;
       Size cs{};
       uint64_t fenceVal = 0;
+      LARGE_INTEGER acquireStart{}, acquireEnd{}, renderStart{}, renderEnd{};
+      QueryPerformanceCounter(&acquireStart);
       if (!cap.acquire(color, cs, fenceVal)) {
         // No new WGC frame yet — do not re-submit with stale resource states.
         // Sleep(1) on Windows can stall for 1-15ms and was a stutter source.
@@ -276,11 +287,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (!SwitchToThread()) SleepEx(0, TRUE);
         continue;
       }
+      QueryPerformanceCounter(&acquireEnd);
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
       lastCs = cs;
       setScaleSizes(cs, display);
       if (!gfx.ensureAuxTextures(cs)) throw std::runtime_error("auxiliary graphics textures could not be resized");
+      QueryPerformanceCounter(&renderStart);
 
       // Keep a Camera click pending until a frame is available. The actual
       // PNG is still generated from the post-FSR presentation surface below.
@@ -449,6 +462,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       gfx.end();
       gfx.present();
+      QueryPerformanceCounter(&renderEnd);
+      const double acquireMs = (acquireEnd.QuadPart - acquireStart.QuadPart) * 1000.0 / double(freq.QuadPart);
+      const double renderCpuMs = (renderEnd.QuadPart - renderStart.QuadPart) * 1000.0 / double(freq.QuadPart);
+      trace.record(cap.totalFrames(), loopMs, acquireMs, renderCpuMs, cs, display, spec.motionModeText, usedFsr);
 
       HudInfo hi;
       hi.fps = fps;
