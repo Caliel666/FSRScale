@@ -404,7 +404,7 @@ static bool writeScreenshotPng(const std::wstring& folder,
                                 CLSCTX_INPROC_SERVER,
                                 IID_PPV_ARGS(&fac)))) break;
     if (FAILED(fac->CreateBitmapFromMemory(
-          width, height, GUID_WICPixelFormat32bppBGRA,
+          width, height, GUID_WICPixelFormat32bppRGBA,
           rowPitch, rowPitch * height,
           const_cast<BYTE*>(pixels), &bmp))) break;
     if (FAILED(fac->CreateStream(&stream))) break;
