@@ -331,11 +331,15 @@ void drawCursor()
       const int dw = out.right - out.left;
       const int dh = out.bottom - out.top;
 
-      if (sw > 1 && sh > 1 &&
-          ci.ptScreenPos.x >= srcTopLeft.x && ci.ptScreenPos.x < srcBottomRight.x &&
-          ci.ptScreenPos.y >= srcTopLeft.y && ci.ptScreenPos.y < srcBottomRight.y) {
-        const double nx = double(ci.ptScreenPos.x - srcTopLeft.x) / double(sw - 1);
-        const double ny = double(ci.ptScreenPos.y - srcTopLeft.y) / double(sh - 1);
+      if (sw > 1 && sh > 1 && dw > 1 && dh > 1) {
+        // Clamp instead of skipping the transform when Win32 reports a
+        // cursor just outside the client rectangle (often during focus/DPI
+        // transitions). Skipping it made the cursor jump to raw desktop
+        // coordinates and appear offset from the upscaled game.
+        const LONG sourceX = std::clamp(ci.ptScreenPos.x, srcTopLeft.x, srcBottomRight.x - 1);
+        const LONG sourceY = std::clamp(ci.ptScreenPos.y, srcTopLeft.y, srcBottomRight.y - 1);
+        const double nx = double(sourceX - srcTopLeft.x) / double(sw - 1);
+        const double ny = double(sourceY - srcTopLeft.y) / double(sh - 1);
         visualPos.x = out.left + (LONG)std::lround(nx * double(dw - 1));
         visualPos.y = out.top  + (LONG)std::lround(ny * double(dh - 1));
       }
