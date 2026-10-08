@@ -168,6 +168,11 @@ bool FastMv::ensureResources(Size rs)
         m_lh[m_levels] = nh;
         ++m_levels;
     }
+    if (m_levels < 2)
+    {
+        m_error = L"fast MV requires at least a 2-level pyramid";
+        return false;
+    }
 
     for (int k = 0; k < m_levels; ++k)
     {
