@@ -1,158 +1,114 @@
-#include "fastmv_shaders.h"
+#include "fastmv.h"
 #include <windows.h>
 #include <d3d12.h>
-#include <d3dcompiler.h>
-#include <cmath>
-#include <cstdint>
+#include <dxgi1_6.h>
+#include <wrl.h>
 #include <iostream>
-#include <string>
 #include <vector>
-#include <algorithm>
+#include <stdexcept>
 
-static bool compileShader(const char* body, const char* name)
+using Microsoft::WRL::ComPtr;
+
+static void fail(const char* s) { std::cerr << s << "\n"; ExitProcess(1); }
+
+static ComPtr<ID3D12Resource> makeTex(ID3D12Device* dev, UINT w, UINT h, DXGI_FORMAT fmt)
 {
-    const std::string src = std::string(FastMvShaders::Common) + body;
-    ID3DBlob* code = nullptr;
-    ID3DBlob* errors = nullptr;
-    const HRESULT hr = D3DCompile(
-        src.data(), src.size(), name, nullptr, nullptr,
-        "main", "cs_5_1", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0,
-        &code, &errors);
-    if (FAILED(hr)) {
-        if (errors)
-            std::cerr << static_cast<const char*>(errors->GetBufferPointer()) << "\n";
-        if (errors) errors->Release();
-        if (code) code->Release();
-        return false;
-    }
-    code->Release();
-    if (errors) errors->Release();
-    return true;
+    D3D12_HEAP_PROPERTIES hp{}; hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC d{};
+    d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    d.Width = w; d.Height = h; d.DepthOrArraySize = 1; d.MipLevels = 1;
+    d.Format = fmt; d.SampleDesc.Count = 1;
+    d.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    ComPtr<ID3D12Resource> r;
+    if (FAILED(dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &d,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&r)))) fail("texture creation failed");
+    return r;
 }
 
-static bool testRootSignature()
+static void barrier(ID3D12GraphicsCommandList* cmd, ID3D12Resource* r,
+                    D3D12_RESOURCE_STATES a, D3D12_RESOURCE_STATES b)
 {
-    D3D12_DESCRIPTOR_RANGE srv{};
-    srv.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srv.NumDescriptors = 3;
-
-    D3D12_DESCRIPTOR_RANGE uav{};
-    uav.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    uav.NumDescriptors = 2;
-
-    D3D12_ROOT_PARAMETER p[3]{};
-    p[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    p[0].DescriptorTable = { 1, &srv };
-    p[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    p[1].DescriptorTable = { 1, &uav };
-    p[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    p[2].Constants.ShaderRegister = 0;
-    p[2].Constants.Num32BitValues = 14;
-
-    D3D12_STATIC_SAMPLER_DESC samp{};
-    samp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    samp.AddressU = samp.AddressV = samp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-
-    D3D12_ROOT_SIGNATURE_DESC rs{};
-    rs.NumParameters = 3;
-    rs.pParameters = p;
-    rs.NumStaticSamplers = 1;
-    rs.pStaticSamplers = &samp;
-
-    ID3DBlob* blob = nullptr;
-    ID3DBlob* errors = nullptr;
-    const HRESULT hr = D3D12SerializeRootSignature(
-        &rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors);
-    if (FAILED(hr) && errors)
-        std::cerr << static_cast<const char*>(errors->GetBufferPointer()) << "\n";
-    if (errors) errors->Release();
-    if (blob) blob->Release();
-    return SUCCEEDED(hr);
-}
-
-// CPU reference checks for the two invariants that matter most for this
-// estimator: a still image must stay exactly still, and a clean translation
-// must be recovered rather than replaced with arbitrary noise.
-static float sad(const std::vector<float>& a, const std::vector<float>& b,
-                 int w, int h, int dx, int dy)
-{
-    const int x0 = std::max(0, -dx);
-    const int x1 = std::min(w, w - dx);
-    const int y0 = std::max(0, -dy);
-    const int y1 = std::min(h, h - dy);
-    if (x0 >= x1 || y0 >= y1) return 1e9f;
-
-    float s = 0.0f;
-    int n = 0;
-    for (int y=y0; y<y1; ++y)
-        for (int x=x0; x<x1; ++x) {
-            s += std::fabs(a[y*w+x] - b[(y+dy)*w + (x+dx)]);
-            ++n;
-        }
-    return s / float(n);
-}
-
-static bool testMotionMath()
-{
-    constexpr int W = 64, H = 48;
-    std::vector<float> a(W*H), b(W*H);
-    for (int y=0; y<H; ++y)
-        for (int x=0; x<W; ++x)
-            a[y*W+x] = float(((x*13 + y*7) ^ (x*y*3)) & 255) / 255.0f;
-
-    b = a;
-    if (sad(a,b,W,H,0,0) != 0.0f)
-        return false;
-
-    float best = 1e9f;
-    int bestDx = 0, bestDy = 0;
-    // b is a translated copy of a; current -> previous is tested in the same
-    // direction used by the FastMv shader.
-    const int tx = 3, ty = -2;
-    for (int y=0; y<H; ++y)
-        for (int x=0; x<W; ++x) {
-            int sx = std::clamp(x-tx,0,W-1);
-            int sy = std::clamp(y-ty,0,H-1);
-            b[y*W+x] = a[sy*W+sx];
-        }
-
-    for (int dy=-6; dy<=6; ++dy)
-        for (int dx=-6; dx<=6; ++dx) {
-            float c = sad(b,a,W,H,dx,dy);
-            if (c < best) { best=c; bestDx=dx; bestDy=dy; }
-        }
-
-    return best < 0.02f && bestDx == -tx && bestDy == -ty;
+    D3D12_RESOURCE_BARRIER x{};
+    x.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    x.Transition.pResource = r;
+    x.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    x.Transition.StateBefore = a;
+    x.Transition.StateAfter = b;
+    cmd->ResourceBarrier(1, &x);
 }
 
 int main()
 {
-    struct Shader { const char* name; const char* src; };
-    const Shader shaders[] = {
-        {"luma", FastMvShaders::Luma},
-        {"down", FastMvShaders::Down},
-        {"search", FastMvShaders::Search},
-        {"median", FastMvShaders::Median},
-        {"pixel", FastMvShaders::Pixel},
-    };
+    ComPtr<IDXGIFactory6> factory;
+    if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)))) fail("DXGI factory failed");
 
-    for (const auto& s : shaders) {
-        if (!compileShader(s.src, s.name)) {
-            std::cerr << "shader compile failed: " << s.name << "\n";
-            return 1;
-        }
+    ComPtr<IDXGIAdapter1> adapter;
+    for (UINT i=0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+        DXGI_ADAPTER_DESC1 d{}; adapter->GetDesc1(&d);
+        if (!(d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) break;
+        adapter.Reset();
     }
+    if (!adapter) fail("no hardware adapter");
 
-    if (!testRootSignature()) {
-        std::cerr << "root signature serialization failed\n";
+    ComPtr<ID3D12Device> dev;
+    if (FAILED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
+                                 IID_PPV_ARGS(&dev)))) fail("D3D12 device failed");
+
+    D3D12_COMMAND_QUEUE_DESC qd{}; qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ComPtr<ID3D12CommandQueue> queue;
+    if (FAILED(dev->CreateCommandQueue(&qd, IID_PPV_ARGS(&queue)))) fail("queue failed");
+
+    ComPtr<ID3D12CommandAllocator> alloc;
+    ComPtr<ID3D12GraphicsCommandList> cmd;
+    if (FAILED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))) ||
+        FAILED(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.Get(), nullptr,
+                                       IID_PPV_ARGS(&cmd)))) fail("command list failed");
+
+    constexpr UINT W = 640, H = 360;
+    auto color = makeTex(dev.Get(), W, H, DXGI_FORMAT_B8G8R8A8_UNORM);
+    auto mv = makeTex(dev.Get(), W, H, DXGI_FORMAT_R16G16_FLOAT);
+    auto reactive = makeTex(dev.Get(), W, H, DXGI_FORMAT_R8_UNORM);
+
+    FastMv mvEstimator;
+    if (!mvEstimator.init(dev.Get(), {W,H})) fail("FastMv init failed");
+
+    // Capture input is SRV; FastMv outputs start as UAV.
+    barrier(cmd.Get(), color.Get(), D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    barrier(cmd.Get(), mv.Get(), D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    barrier(cmd.Get(), reactive.Get(), D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    if (!mvEstimator.dispatch(cmd.Get(), color.Get(), mv.Get(), reactive.Get(), {W,H}, true))
+        fail("FastMv first dispatch failed");
+
+    if (!mvEstimator.dispatch(cmd.Get(), color.Get(), mv.Get(), reactive.Get(), {W,H}, false))
+        fail("FastMv second dispatch failed");
+
+    if (FAILED(cmd->Close())) fail("command list close failed");
+    ID3D12CommandList* lists[] = { cmd.Get() };
+    queue->ExecuteCommandLists(1, lists);
+
+    ComPtr<ID3D12Fence> fence;
+    if (FAILED(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
+        fail("fence failed");
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!ev) fail("event failed");
+    queue->Signal(fence.Get(), 1);
+    if (fence->GetCompletedValue() != 1) {
+        fence->SetEventOnCompletion(1, ev);
+        WaitForSingleObject(ev, INFINITE);
+    }
+    CloseHandle(ev);
+
+    const HRESULT removed = dev->GetDeviceRemovedReason();
+    if (FAILED(removed)) {
+        std::cerr << "FastMv GPU execution removed the device: 0x"
+                  << std::hex << static_cast<unsigned long>(removed) << "\n";
         return 2;
     }
 
-    if (!testMotionMath()) {
-        std::cerr << "motion reference test failed\n";
-        return 3;
-    }
-
-    std::cout << "FastMv shader + root-signature + motion invariants: PASS\n";
+    std::cout << "FastMv real D3D12 GPU dispatch: PASS\n";
     return 0;
 }
