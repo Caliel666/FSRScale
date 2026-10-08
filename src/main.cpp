@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <thread>
+#include <stdexcept>
 
 static bool hasConsole() { return GetConsoleWindow() != nullptr; }
 
@@ -279,7 +280,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         gfx.queue()->Wait(cap.fence(), fenceVal);
       lastCs = cs;
       setScaleSizes(cs, display);
-      gfx.ensureAuxTextures(cs);
+      if (!gfx.ensureAuxTextures(cs)) throw std::runtime_error("auxiliary graphics textures could not be resized");
 
       // Keep a Camera click pending until a frame is available. The actual
       // PNG is still generated from the post-FSR presentation surface below.
@@ -294,6 +295,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       ID3D12Resource* upscale = gfx.upscaleOutput();
       ID3D12Resource* depth = gfx.dummyDepth();
       ID3D12Resource* mv = gfx.motionVectors();
+      ID3D12Resource* reactive = gfx.reactiveMask();
 
       ID3D12Resource* presentSrc = color.Get();
       bool usedFsr = false;
@@ -325,14 +327,41 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
         // Motion dispatch. --mv amdof is the existing implementation; --mv fast is the
         // new quarter-resolution screen-space estimator.
-        if (spec.motionMode == TargetSpec::MotionMode::Fast)
-          fastmv.dispatch(cmd, color.Get(), mv, cs, reset);
-        else
+        bool motionReady = false;
+        bool reactiveReady = false;
+        if (spec.motionMode == TargetSpec::MotionMode::Fast) {
+          motionReady = fastmv.dispatch(cmd, color.Get(), mv, reactive, cs, reset);
+          reactiveReady = motionReady;
+        } else {
           amdof.dispatch(cmd, color.Get(), mv, cs, reset);
+          motionReady = true;
+        }
+
+        // FastMv writes both resources as UAV. FSR consumes them as SRVs.
+        // Keep AMDOF's existing state contract untouched.
+        {
+          D3D12_RESOURCE_BARRIER mb[2]{};
+          int mn = 0;
+          auto tr = [&](ID3D12Resource* r) {
+            mb[mn].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            mb[mn].Transition.pResource = r;
+            mb[mn].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            mb[mn].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            mb[mn].Transition.StateAfter =
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            ++mn;
+          };
+          tr(mv);
+          if (reactiveReady) tr(reactive);
+          cmd->ResourceBarrier(mn, mb);
+        }
 
         // FSR dispatch (reads color/depth/mv as SRV, writes upscale as UAV).
         // No barrier needed for mv — AMDOF left it in PS|NPS.
-        usedFsr = fsr.dispatch(cmd, color.Get(), depth, mv, upscale, cs, display, dt, reset);
+        usedFsr = motionReady && fsr.dispatch(cmd, color.Get(), depth, mv,
+                                              reactiveReady ? reactive : nullptr,
+                                              upscale, cs, display, dt, reset);
         reset = false;
         presentSrc = usedFsr ? upscale : color.Get();
 
@@ -345,7 +374,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         // (color stays in PS|NPS for the blit in case !usedFsr; it is
         //  returned to COMMON in batch D after the blit.)
         {
-          D3D12_RESOURCE_BARRIER b[4]{};
+          D3D12_RESOURCE_BARRIER b[5]{};
           int n = 0;
           auto tr = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES a, D3D12_RESOURCE_STATES s) {
             b[n].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -362,6 +391,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
           tr(mv, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+          if (reactiveReady)
+            tr(reactive, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+               D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
           tr(back, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
           cmd->ResourceBarrier(n, b);
         }

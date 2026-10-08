@@ -163,6 +163,38 @@ bool Graphics::createAuxTextures(Size render)
     hr(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_motionVectors)));
   }
+  {
+    D3D12_RESOURCE_DESC rd{};
+    rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rd.Width = render.w; rd.Height = render.h;
+    rd.DepthOrArraySize = 1; rd.MipLevels = 1;
+    rd.Format = DXGI_FORMAT_R8_UNORM;
+    rd.SampleDesc.Count = 1;
+    rd.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    hr(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_reactiveMask)));
+  }
+
+  if (!m_clearGpuHeap) {
+    D3D12_DESCRIPTOR_HEAP_DESC gpu{};
+    gpu.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    gpu.NumDescriptors = 1;
+    gpu.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    hr(m_dev->CreateDescriptorHeap(&gpu, IID_PPV_ARGS(&m_clearGpuHeap)));
+
+    D3D12_DESCRIPTOR_HEAP_DESC cpu = gpu;
+    cpu.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    hr(m_dev->CreateDescriptorHeap(&cpu, IID_PPV_ARGS(&m_clearCpuHeap)));
+  }
+
+  D3D12_UNORDERED_ACCESS_VIEW_DESC uv{};
+  uv.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  uv.Format = DXGI_FORMAT_R32_FLOAT;
+  m_dev->CreateUnorderedAccessView(m_dummyDepth.Get(), nullptr, &uv,
+                                   m_clearGpuHeap->GetCPUDescriptorHandleForHeapStart());
+  m_dev->CreateUnorderedAccessView(m_dummyDepth.Get(), nullptr, &uv,
+                                   m_clearCpuHeap->GetCPUDescriptorHandleForHeapStart());
+
   return true;
 }
 
@@ -275,6 +307,19 @@ bool Graphics::begin()
 {
   m_alloc[m_index]->Reset();
   m_cmd->Reset(m_alloc[m_index].Get(), nullptr);
+
+  // The capture pipeline has no real game depth. Always clear the synthetic
+  // depth to deterministic far depth before FSR sees it; an uninitialized
+  // UAV here was a major source of temporal instability/smearing.
+  if (m_dummyDepth && m_clearGpuHeap && m_clearCpuHeap) {
+    ID3D12DescriptorHeap* heaps[] = { m_clearGpuHeap.Get() };
+    m_cmd->SetDescriptorHeaps(1, heaps);
+    const FLOAT value[4] = { 0.f, 0.f, 0.f, 0.f };
+    m_cmd->ClearUnorderedAccessViewFloat(
+      m_clearGpuHeap->GetGPUDescriptorHandleForHeapStart(),
+      m_clearCpuHeap->GetCPUDescriptorHandleForHeapStart(),
+      m_dummyDepth.Get(), value, 0, nullptr);
+  }
   return true;
 }
 

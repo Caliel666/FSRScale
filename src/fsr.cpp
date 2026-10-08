@@ -124,7 +124,9 @@ bool Fsr::init(ID3D12Device* device, Size maxRender, Size maxDisplay)
   up.header.pNext = &backend.header;
   up.maxRenderSize = { maxRender.w, maxRender.h };
   up.maxUpscaleSize = { maxDisplay.w, maxDisplay.h };
-  up.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
+  up.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE |
+             FFX_UPSCALE_ENABLE_DEPTH_INVERTED |
+             FFX_UPSCALE_ENABLE_DEPTH_INFINITE;
 
   ffxReturnCode_t rc = g_ffx.CreateContext(&m_ctx, &up.header, nullptr);
   if (rc != FFX_API_RETURN_OK || !m_ctx) {
@@ -170,6 +172,7 @@ bool Fsr::dispatch(ID3D12GraphicsCommandList* cmd,
                    ID3D12Resource* color,
                    ID3D12Resource* depth,
                    ID3D12Resource* motionVectors,
+                   ID3D12Resource* reactive,
                    ID3D12Resource* output,
                    Size render, Size display,
                    float dt, bool reset)
@@ -187,6 +190,8 @@ bool Fsr::dispatch(ID3D12GraphicsCommandList* cmd,
     d.depth = apiRes(depth, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
   if (motionVectors)
     d.motionVectors = apiRes(motionVectors, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+  if (reactive)
+    d.reactive = apiRes(reactive, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 
   d.renderSize = { render.w, render.h };
   d.upscaleSize = { display.w, display.h };
