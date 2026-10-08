@@ -100,6 +100,11 @@ static bool stopHotkeyDown(UINT modifiers, UINT vk)
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 {
+  // Keep HWND, WGC crop, and cursor coordinates in the same physical-pixel
+  // space. DPI virtualization could make the cursor miss the source bounds,
+  // disabling both clipping and the source-to-presentation coordinate map.
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   TargetSpec spec;
