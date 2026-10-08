@@ -399,7 +399,7 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
             ID3D12Resource* u[2] = { m_grid[k].Get(), nullptr };
             DXGI_FORMAT uf[2] = {
                 DXGI_FORMAT_R16G16_FLOAT,
-                DXGI_FORMAT_R32_FLOAT
+                DXGI_FORMAT_R8_UNORM
             };
 
             dispatchPass(cmd, m_searchPso.Get(), s, sf, u, uf,
@@ -465,7 +465,7 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
         ID3D12Resource* u[2] = { fullResMv, reactive };
         DXGI_FORMAT uf[2] = {
             DXGI_FORMAT_R16G16_FLOAT,
-            DXGI_FORMAT_R32_FLOAT
+            DXGI_FORMAT_R8_UNORM
         };
 
         dispatchPass(cmd, m_pixelPso.Get(), s, sf, u, uf,
