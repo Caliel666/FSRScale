@@ -66,6 +66,8 @@ private:
 
   ComPtr<ID3D12Fence> m_fence;
   ComPtr<ID3D11Fence> m_fence11;
+  // Safe fallback when the shared D3D11 fence cannot be opened/signalled.
+  ComPtr<ID3D11Query> m_copyCompleteQuery;
   HANDLE m_fenceHandle = nullptr;
   uint64_t m_fenceValue = 0;
 
