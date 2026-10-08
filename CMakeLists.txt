@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 project(NRLive LANGUAGES CXX)
+include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -155,4 +156,21 @@ if(_FFX_DLL)
       "${_FFX_DLL}"
       "$<TARGET_FILE_DIR:NRLive>"
   )
+endif()
+
+if(BUILD_TESTING)
+  add_executable(fastmv_shader_test
+    tests/fastmv_shader_test.cpp
+  )
+  target_include_directories(fastmv_shader_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+  )
+  target_compile_definitions(fastmv_shader_test PRIVATE
+    UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
+  )
+  target_link_libraries(fastmv_shader_test PRIVATE
+    d3d12 d3dcompiler dxgi
+  )
+  add_test(NAME fastmv_shader_and_motion_invariants
+           COMMAND fastmv_shader_test)
 endif()
