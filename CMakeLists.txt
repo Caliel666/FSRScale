@@ -161,6 +161,7 @@ endif()
 if(BUILD_TESTING)
   add_executable(fastmv_shader_test
     tests/fastmv_shader_test.cpp
+    src/fastmv.cpp
   )
   target_include_directories(fastmv_shader_test PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
