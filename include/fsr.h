@@ -14,6 +14,7 @@ public:
                 ID3D12Resource* color,
                 ID3D12Resource* depth,
                 ID3D12Resource* motionVectors,
+                ID3D12Resource* reactive,
                 ID3D12Resource* output,
                 Size render, Size display,
                 float dt, bool reset);
