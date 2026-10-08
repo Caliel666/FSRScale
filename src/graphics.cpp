@@ -1,5 +1,8 @@
 #include "graphics.h"
 #include <d3dcompiler.h>
+#include <wincodec.h>
+#include <shlobj.h>
+#include <filesystem>
 #include <stdexcept>
 
 static void hr(HRESULT x) { if (FAILED(x)) throw std::runtime_error("D3D12 failure"); }
@@ -277,6 +280,150 @@ bool Graphics::begin()
 
 void Graphics::end() { m_cmd->Close(); }
 
+bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t frameIndex)
+{
+  if (!m_cmd || !m_back[m_index] || m_screenshotPending)
+    return false;
+
+  ID3D12Resource* back = m_back[m_index].Get();
+  const D3D12_RESOURCE_DESC desc = back->GetDesc();
+  if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+      desc.Width == 0 || desc.Height == 0)
+    return false;
+
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+  UINT numRows = 0;
+  UINT64 rowSize = 0;
+  UINT64 totalBytes = 0;
+  m_dev->GetCopyableFootprints(&desc, 0, 1, 0,
+                               &footprint, &numRows, &rowSize, &totalBytes);
+  if (totalBytes == 0 || numRows == 0)
+    return false;
+
+  D3D12_HEAP_PROPERTIES hp{};
+  hp.Type = D3D12_HEAP_TYPE_READBACK;
+  D3D12_RESOURCE_DESC rd{};
+  rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  rd.Width = totalBytes;
+  rd.Height = 1;
+  rd.DepthOrArraySize = 1;
+  rd.MipLevels = 1;
+  rd.SampleDesc.Count = 1;
+  rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+  ComPtr<ID3D12Resource> readback;
+  if (FAILED(m_dev->CreateCommittedResource(
+        &hp, D3D12_HEAP_FLAG_NONE, &rd,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+        IID_PPV_ARGS(&readback))))
+    return false;
+
+  D3D12_RESOURCE_BARRIER toCopy{};
+  toCopy.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toCopy.Transition.pResource = back;
+  toCopy.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  toCopy.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  toCopy.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  m_cmd->ResourceBarrier(1, &toCopy);
+
+  D3D12_TEXTURE_COPY_LOCATION src{};
+  src.pResource = back;
+  src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  src.SubresourceIndex = 0;
+
+  D3D12_TEXTURE_COPY_LOCATION dst{};
+  dst.pResource = readback.Get();
+  dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  dst.PlacedFootprint = footprint;
+
+  m_cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+  D3D12_RESOURCE_BARRIER toRender{};
+  toRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  toRender.Transition.pResource = back;
+  toRender.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  toRender.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  toRender.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  m_cmd->ResourceBarrier(1, &toRender);
+
+  m_screenshotReadback = readback;
+  m_screenshotFootprint = footprint;
+  m_screenshotWidth = (UINT)desc.Width;
+  m_screenshotHeight = (UINT)desc.Height;
+  m_screenshotFolder = folder;
+  m_screenshotFrame = frameIndex;
+  m_screenshotPending = true;
+  return true;
+}
+
+static bool writeScreenshotPng(const std::wstring& folder,
+                               uint64_t frameIndex,
+                               UINT width,
+                               UINT height,
+                               UINT rowPitch,
+                               const BYTE* pixels)
+{
+  if (!pixels || width == 0 || height == 0)
+    return false;
+
+  std::wstring dir = folder;
+  if (dir.empty()) {
+    wchar_t p[MAX_PATH * 4]{};
+    SHGetFolderPathW(nullptr, CSIDL_MYPICTURES, nullptr, SHGFP_TYPE_CURRENT, p);
+    dir = p;
+    if (!dir.empty() && dir.back() != L'\\') dir += L'\\';
+    dir += L"NRLive";
+  }
+
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  if (ec)
+    return false;
+
+  SYSTEMTIME st{};
+  GetLocalTime(&st);
+  wchar_t name[128]{};
+  swprintf_s(name, L"NRLive_%04u%02u%02u_%02u%02u%02u_%llu.png",
+             st.wYear, st.wMonth, st.wDay,
+             st.wHour, st.wMinute, st.wSecond,
+             (unsigned long long)frameIndex);
+  const std::wstring file = dir + L"\\" + name;
+
+  HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  const bool uninit = SUCCEEDED(hr);
+
+  ComPtr<IWICImagingFactory> fac;
+  ComPtr<IWICBitmap> bmp;
+  ComPtr<IWICStream> stream;
+  ComPtr<IWICBitmapEncoder> enc;
+  ComPtr<IWICBitmapFrameEncode> frame;
+
+  bool ok = false;
+  do {
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&fac)))) break;
+    if (FAILED(fac->CreateBitmapFromMemory(
+          width, height, GUID_WICPixelFormat32bppBGRA,
+          rowPitch, rowPitch * height,
+          const_cast<BYTE*>(pixels), &bmp))) break;
+    if (FAILED(fac->CreateStream(&stream))) break;
+    if (FAILED(stream->InitializeFromFilename(file.c_str(), GENERIC_WRITE))) break;
+    if (FAILED(fac->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc))) break;
+    if (FAILED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache))) break;
+    if (FAILED(enc->CreateNewFrame(&frame, nullptr))) break;
+    if (FAILED(frame->Initialize(nullptr))) break;
+    if (FAILED(frame->WriteSource(bmp.Get(), nullptr))) break;
+    if (FAILED(frame->Commit())) break;
+    if (FAILED(enc->Commit())) break;
+    ok = true;
+  } while (false);
+
+  if (uninit)
+    CoUninitialize();
+  return ok;
+}
+
 bool Graphics::present()
 {
   ID3D12CommandList* lists[] = { m_cmd.Get() };
@@ -289,6 +436,34 @@ bool Graphics::present()
   const uint64_t v = ++m_fenceValue;
   m_queue->Signal(m_fence.Get(), v);
   m_frameFence[m_index] = v;
+
+  // A screenshot is synchronized only on the frame that requested it.
+  // This guarantees the PNG contains the post-FSR backbuffer while normal
+  // frames retain the existing 3-buffered, non-blocking path.
+  if (m_screenshotPending) {
+    if (m_fence->GetCompletedValue() < v) {
+      m_fence->SetEventOnCompletion(v, m_fenceEvent);
+      WaitForSingleObject(m_fenceEvent, 1000);
+    }
+
+    if (m_fence->GetCompletedValue() >= v && m_screenshotReadback) {
+      void* mapped = nullptr;
+      D3D12_RANGE range{0, (SIZE_T)(m_screenshotFootprint.Footprint.RowPitch * m_screenshotHeight)};
+      if (SUCCEEDED(m_screenshotReadback->Map(0, &range, &mapped)) && mapped) {
+        const BYTE* base = static_cast<const BYTE*>(mapped) + m_screenshotFootprint.Offset;
+        writeScreenshotPng(m_screenshotFolder, m_screenshotFrame,
+                           m_screenshotWidth, m_screenshotHeight,
+                           m_screenshotFootprint.Footprint.RowPitch, base);
+        D3D12_RANGE written{0, 0};
+        m_screenshotReadback->Unmap(0, &written);
+      }
+    }
+
+    m_screenshotReadback.Reset();
+    m_screenshotPending = false;
+    m_screenshotFolder.clear();
+    m_screenshotFrame = 0;
+  }
 
   const UINT bufCount = 3; // match swap chain BufferCount
   if (m_fenceValue >= bufCount) {
