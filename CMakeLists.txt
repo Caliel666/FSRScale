@@ -131,6 +131,7 @@ add_executable(NRLive WIN32
   src/ui.cpp
   src/overlay.cpp
   src/target.cpp
+  src/frametrace.cpp
 )
 
 target_include_directories(NRLive PRIVATE
