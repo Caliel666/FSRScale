@@ -7,6 +7,7 @@
 #include "overlay.h"
 #include "target.h"
 #include "frametrace.h"
+#include "frame_timing.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
@@ -286,7 +287,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       QueryPerformanceCounter(&now);
       loopMs = (float)((now.QuadPart - lastCaptured.QuadPart) * 1000.0 / double(freq.QuadPart));
       lastCaptured = now;
-      if (loopMs > 0.001f) fps = 1000.0f / loopMs;
+      if (loopMs > 0.001f) fps = frame_timing::fpsFromFrameDeltaMs(loopMs);
       Size csForOverlay = cs;
       overlayUpdate(fps, loopMs, csForOverlay, display);
       if (cap.fence() && fenceVal)
@@ -301,7 +302,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       screenshotRequested = overlayConsumeScreenshot();
 
       // dt for FSR — use the frame ms from the top-of-loop QPC (stored in fps)
-      float dt = std::clamp(1000.0f / (fps > 0.001f ? fps : 60.0f), 1.0f, 100.0f);
+      float dt = frame_timing::clampFrameDeltaMs(fps > 0.001f ? 1000.0f / fps : (1000.0f / 60.0f));
 
       gfx.begin();
       auto* cmd = gfx.cmd();
