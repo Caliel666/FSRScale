@@ -226,6 +226,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     QueryPerformanceCounter(&lastCaptured);
 
     ShowWindow(out, SW_SHOWNOACTIVATE);
+    QueryPerformanceCounter(&lastCaptured); // exclude initialization from the first captured-frame interval
     /* HUD starts hidden; Ctrl+Home (or --overlaykey) toggles it */
 
     while (running) {
