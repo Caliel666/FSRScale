@@ -4,6 +4,7 @@
 #include <dxgi1_6.h>
 #include <wrl.h>
 #include <cstdint>
+#include <string>
 using Microsoft::WRL::ComPtr;
 
 struct Size { uint32_t w = 0, h = 0; };
@@ -43,6 +44,11 @@ public:
   // backbuffer (must already be in RENDER_TARGET state).
   void blitToBackbuffer(ID3D12Resource* src);
 
+  // Queue a PNG readback of the current backbuffer. Call after the final
+  // FSR/blit pass and before end()/present(). present() completes the
+  // readback only when a screenshot was requested.
+  bool captureBackbufferScreenshot(const std::wstring& folder, uint64_t frameIndex);
+
 private:
   bool buildSwapChain(Size display);
   bool createAuxTextures(Size render);
@@ -81,4 +87,14 @@ private:
   // Cached blit SRV — recreate only when the source resource pointer changes.
   ID3D12Resource* m_lastBlitSrc = nullptr;
   DXGI_FORMAT m_lastBlitFmt = DXGI_FORMAT_UNKNOWN;
+
+  // One-shot screenshot readback. Kept alive until present() has submitted
+  // the command list and waited for its fence.
+  ComPtr<ID3D12Resource> m_screenshotReadback;
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT m_screenshotFootprint{};
+  UINT m_screenshotWidth = 0;
+  UINT m_screenshotHeight = 0;
+  std::wstring m_screenshotFolder;
+  uint64_t m_screenshotFrame = 0;
+  bool m_screenshotPending = false;
 };
