@@ -234,10 +234,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
       drawCursor();
 
-      // Take screenshot if requested — do this BEFORE cap.acquire so it
-      // works even when no new frame arrived.  Uses the last captured
-      // texture which persists between frames.
-      if (overlayConsumeScreenshot()) cap.saveScreenshot(overlayScreenshotPath(), cap.totalFrames());
+      // Consume the Camera request now, but execute it after the final
+      // FSR/blit pass below. The old implementation read the raw WGC capture
+      // texture, which omitted the post-FSR presentation.
+      const bool screenshotRequested = overlayConsumeScreenshot();
 
       // Single QPC per frame — measures full frame time (previous-top to
       // current-top).  Both the FPS overlay and the FSR dt use this value.
@@ -384,6 +384,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       const float clear[4] = { 0, 0, 0, 1 };
       cmd->ClearRenderTargetView(gfx.rtvHandle(), clear, 0, nullptr);
       gfx.blitToBackbuffer(presentSrc);
+
+      // Capture the actual presentation surface, after FSR3 and the final
+      // stretch blit. The overlay is a separate window, so it is excluded.
+      if (screenshotRequested)
+        gfx.captureBackbufferScreenshot(overlayScreenshotPath(), cap.totalFrames());
 
       // ---- Batch D: post-blit backbuffer + colour restore -----------------
       //   back:  RTV -> PRESENT  (always)
