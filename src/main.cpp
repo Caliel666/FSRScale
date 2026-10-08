@@ -221,9 +221,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     bool stopLatched = false;
     float fps = 0;
     Size lastCs{};
-    LARGE_INTEGER freq, last, now;
+    LARGE_INTEGER freq, lastCaptured, now;
     QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&last);
+    QueryPerformanceCounter(&lastCaptured);
 
     ShowWindow(out, SW_SHOWNOACTIVATE);
     /* HUD starts hidden; Ctrl+Home (or --overlaykey) toggles it */
@@ -251,16 +251,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       // current-top).  Both the FPS overlay and the FSR dt use this value.
       // The previous code had a second QPC after cap.acquire which measured
       // only the render portion, making the displayed FPS incorrect.
+      // Frame time is measured between successfully acquired capture frames, not
+      // between busy-poll iterations. Using poll cadence here made FSR receive
+      // an unrealistically tiny dt and made the FPS HUD report the polling rate.
       float loopMs = 0.0f;
-      {
-        QueryPerformanceCounter(&now);
-        loopMs = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
-        last = now;
-        float f = (loopMs > 0.001f) ? (1000.0f / loopMs) : 0.0f;
-        fps = f;
-        Size csForOverlay = lastCs.w ? lastCs : render;
-        overlayUpdate(f, loopMs, csForOverlay, display);
-      }
 
       // If the target (game) window is gone, quit.  This happens when the
       // game exits — NRLive should not keep running with a dead target.
@@ -288,6 +282,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         continue;
       }
       QueryPerformanceCounter(&acquireEnd);
+      QueryPerformanceCounter(&now);
+      loopMs = (float)((now.QuadPart - lastCaptured.QuadPart) * 1000.0 / double(freq.QuadPart));
+      lastCaptured = now;
+      if (loopMs > 0.001f) fps = 1000.0f / loopMs;
+      Size csForOverlay = cs;
+      overlayUpdate(fps, loopMs, csForOverlay, display);
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
       lastCs = cs;
