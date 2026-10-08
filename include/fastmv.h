@@ -63,8 +63,7 @@ private:
     uint32_t m_gh[kMaxLevels]{};
     std::wstring m_error;
 
-    ComPtr<ID3D12Resource> m_currLuma[kMaxLevels];
-    ComPtr<ID3D12Resource> m_prevLuma[kMaxLevels];
+    ComPtr<ID3D12Resource> m_luma[2][kMaxLevels];
     ComPtr<ID3D12Resource> m_grid[kMaxLevels];
     ComPtr<ID3D12Resource> m_filtered;
 
