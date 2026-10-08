@@ -234,10 +234,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
       drawCursor();
 
-      // Consume the Camera request now, but execute it after the final
-      // FSR/blit pass below. The old implementation read the raw WGC capture
-      // texture, which omitted the post-FSR presentation.
-      const bool screenshotRequested = overlayConsumeScreenshot();
+      // Camera requests are consumed only once a fresh capture frame is
+      // available, then executed after the final FSR/blit pass below.
+      bool screenshotRequested = false;
 
       // Single QPC per frame — measures full frame time (previous-top to
       // current-top).  Both the FPS overlay and the FSR dt use this value.
@@ -281,6 +280,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       lastCs = cs;
       setScaleSizes(cs, display);
       gfx.ensureAuxTextures(cs);
+
+      // Keep a Camera click pending until a frame is available. The actual
+      // PNG is still generated from the post-FSR presentation surface below.
+      screenshotRequested = overlayConsumeScreenshot();
 
       // dt for FSR — use the frame ms from the top-of-loop QPC (stored in fps)
       float dt = std::clamp(1000.0f / (fps > 0.001f ? fps : 60.0f), 1.0f, 100.0f);
