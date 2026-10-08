@@ -76,13 +76,17 @@ static bool testRootSignature()
 static float sad(const std::vector<float>& a, const std::vector<float>& b,
                  int w, int h, int dx, int dy)
 {
+    const int x0 = std::max(0, -dx);
+    const int x1 = std::min(w, w - dx);
+    const int y0 = std::max(0, -dy);
+    const int y1 = std::min(h, h - dy);
+    if (x0 >= x1 || y0 >= y1) return 1e9f;
+
     float s = 0.0f;
     int n = 0;
-    for (int y=0; y<h; ++y)
-        for (int x=0; x<w; ++x) {
-            int xx = std::clamp(x + dx, 0, w-1);
-            int yy = std::clamp(y + dy, 0, h-1);
-            s += std::fabs(a[y*w+x] - b[yy*w+xx]);
+    for (int y=y0; y<y1; ++y)
+        for (int x=x0; x<x1; ++x) {
+            s += std::fabs(a[y*w+x] - b[(y+dy)*w + (x+dx)]);
             ++n;
         }
     return s / float(n);
