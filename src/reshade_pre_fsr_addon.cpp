@@ -1,4 +1,3 @@
-#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <d3d12.h>
 #include <reshade.hpp>
@@ -14,6 +13,7 @@ namespace
 using namespace reshade::api;
 
 constexpr wchar_t kPreFsrResourceName[] = L"NRLive_PreFSR_Color";
+constexpr GUID kDebugObjectNameW = { 0x4cca5fd8, 0x921f, 0x42c8, { 0x85, 0x66, 0x70, 0xca, 0xf2, 0xa9, 0xb7, 0x41 } };
 
 std::mutex g_mutex;
 HWND g_outputWindow = nullptr;
@@ -45,7 +45,7 @@ bool isPreFsrTarget(command_list *cmd, resource_view view)
 
   wchar_t name[128]{};
   UINT bytes = sizeof(name);
-  if (FAILED(nativeResource->GetPrivateData(WKPDID_D3DDebugObjectNameW, &bytes, name)))
+  if (FAILED(nativeResource->GetPrivateData(kDebugObjectNameW, &bytes, name)))
     return false;
   const size_t chars = std::min<size_t>(bytes / sizeof(wchar_t), std::size(name) - 1);
   name[chars] = L'\0';
