@@ -124,7 +124,7 @@
                         </StackPanel>
                     </Grid>
                     <Border Background="#1B1E23" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,14,0,0">
-                        <TextBlock x:Name="CommandPreview" Text="NRLive.exe --mv fast --sharpness 0.65" FontFamily="Cascadia Code, Consolas" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="CommandPreview" Text="NRLive.exe --mv fast" FontFamily="Cascadia Code, Consolas" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                     </Border>
                 </StackPanel>
             </ScrollViewer>
