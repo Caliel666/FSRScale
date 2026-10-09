@@ -604,6 +604,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
           nextBack.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
           cmd->ResourceBarrier(1, &nextBack);
           generatedFramePresented = true;
+        } else {
+          // Do not keep paying a per-frame cost when the provider refuses a
+          // dispatch. Fall back to the ordinary FSR/blit path and persist the
+          // disabled state so the user doesn't unknowingly run a failing FG path.
+          fgEnabled = false;
+          overlaySetFgEnabled(false);
+          if (cliMode && hasConsole())
+            printCli(L"FSR FG disabled after dispatch failure: " + fg.lastError());
+          setStatus(out, fg.lastError().c_str());
         }
       }
 
