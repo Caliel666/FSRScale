@@ -210,6 +210,29 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     else MessageBoxW(nullptr, msg.c_str(), L"NRLive", MB_ICONWARNING);
   }
 
+  // When the local marker enables ReShade mode, load the colocated DXGI
+  // proxy into this rendering process BEFORE creating our D3D12 device and
+  // swapchain, and therefore before initializing FSR/FSR-FG. ReShade was
+  // previously only seen in NRLiveUI.exe, which cannot affect this process's
+  // rendering chain. Keep the module loaded for the lifetime of the pipeline.
+  HMODULE reshadeLoader = nullptr;
+  if (reshade.enabled) {
+    const std::wstring localDxgi = logDirectory() + L"dxgi.dll";
+    if (GetFileAttributesW(localDxgi.c_str()) != INVALID_FILE_ATTRIBUTES) {
+      reshadeLoader = LoadLibraryW(localDxgi.c_str());
+      if (reshadeLoader) {
+        wchar_t loadedPath[MAX_PATH * 4]{};
+        GetModuleFileNameW(reshadeLoader, loadedPath, static_cast<DWORD>(sizeof(loadedPath) / sizeof(loadedPath[0])));
+        logMain(L"Loaded local ReShade DXGI loader before graphics/FSR initialization: " + std::wstring(loadedPath));
+      } else {
+        const DWORD error = GetLastError();
+        logMain(L"FAILED to load local ReShade DXGI loader before graphics/FSR initialization; Win32 error=" + std::to_wstring(error));
+      }
+    } else {
+      logMain(L"ReShade marker exists, but colocated dxgi.dll is missing; cannot initialize the local ReShade loader.");
+    }
+  }
+
   try {
     Graphics gfx;
     logMain(L"Graphics::init begin; render=" + std::to_wstring(render.w) + L"x" + std::to_wstring(render.h) + L"; display=" + std::to_wstring(display.w) + L"x" + std::to_wstring(display.h));
