@@ -228,6 +228,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     bool reset = true, running = true;
     bool capturePausedForFocus = false;
     bool wasOverlayOpen = false;
+    ULONGLONG overlayCloseGraceUntil = 0;
     bool stopLatched = false;
     float fps = 0;
     Size lastCs{};
@@ -255,6 +256,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       // The overlay's popup can briefly remain the foreground HWND while the
       // game receives focus; don't interpret that transient as Alt-Tab.
       if (wasOverlayOpen && !overlayOpenNow) {
+        overlayCloseGraceUntil = GetTickCount64() + 500;
         SetForegroundWindow(target);
         setOutputFullscreen(out, mon);
         overlaySetOpen(false); // reassert FPS HUD z-order after raising output
@@ -310,7 +312,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (!outRoot) outRoot = GetAncestor(out, GA_ROOT);
         const bool outputOwnsForeground = fg == out || fgRoot == outRoot;
         return fg == target || fgRoot == targetRoot || fgRoot == target ||
-               fg == targetRoot || (outputOwnsForeground && overlayOpenNow);
+               fg == targetRoot || (outputOwnsForeground && GetTickCount64() < overlayCloseGraceUntil);
       };
       const bool shouldPauseCapture = !isOverlayOpen() && !isTargetForeground();
       if (shouldPauseCapture && !capturePausedForFocus) {
