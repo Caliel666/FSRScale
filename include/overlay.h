@@ -38,6 +38,7 @@ struct OverlayFrameLimitConfig {
 bool overlayInit(HINSTANCE inst, HWND output);
 void overlayShutdown();
 void overlaySetOpen(bool open);             // show/hide top bar + settings
+void overlaySetPresentationVisible(bool visible); // hide/re-anchor FPS HUD across focus changes
 void overlayUpdate(float fps, float frametimeMs, Size capture, Size output);
 void overlaySetFsrEnabled(bool enabled);
 bool overlayConsumeFsrToggle();             // returns true once when FSR button clicked
