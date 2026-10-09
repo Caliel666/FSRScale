@@ -287,6 +287,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         break;
       }
 
+      if (stopHotkeyDown(spec.stopHotkeyModifiers, spec.stopHotkeyVk)) {
+        if (!stopLatched) { running = false; break; }
+        stopLatched = true;
+      } else stopLatched = false;
+
       // Overlay mode intentionally takes focus away from the game; never
       // pause capture for that transition. Outside overlay mode, stop WGC
       // while another application's window is foreground and recreate the
@@ -311,11 +316,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         reset = true;
         QueryPerformanceCounter(&lastCaptured);
       }
-
-      if (stopHotkeyDown(spec.stopHotkeyModifiers, spec.stopHotkeyVk)) {
-        if (!stopLatched) { running = false; break; }
-        stopLatched = true;
-      } else stopLatched = false;
 
       if (frameLimiter.enabled() && frameLimiter.method() == 0)
         frameLimiter.wait(); // early mode: pace before capture/CPU preparation
