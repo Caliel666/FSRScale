@@ -16,10 +16,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up .NET 8 for the Windows launcher
+      - name: Set up .NET 10 for the Windows launcher
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       - name: Download AMD FSR SDK 2.3.0 headers and signed providers
         shell: pwsh
