@@ -287,9 +287,11 @@ ffxReturnCode_t FsrFrameGeneration::generationCallback(
     ffxDispatchDescFrameGeneration* params, void* userCtx)
 {
   auto* self = static_cast<FsrFrameGeneration*>(userCtx);
-  if (!self || !params || !self->m_ctx || !g_ffx.Dispatch)
+  if (!self || !params || !g_ffx.Dispatch)
     return FFX_API_RETURN_ERROR_PARAMETER;
   std::lock_guard<std::mutex> lock(self->m_mutex);
+  if (!self->m_ctx)
+    return FFX_API_RETURN_ERROR_PARAMETER;
   // A provider can race a failure/toggle with Present. If generation was
   // disabled after configuration, leave the ordinary present path intact.
   if (!self->m_callbackEnabled)
@@ -347,7 +349,7 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
                                  Size render, Size display,
                                  float dt, bool reset, bool enabled)
 {
-  if (m_failed) {
+  if (failed()) {
     m_error = L"FSR FG disabled after generation callback failure";
     return false;
   }
