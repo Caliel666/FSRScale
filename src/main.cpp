@@ -227,6 +227,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     FrameLimiter frameLimiter;
     bool reset = true, running = true;
     bool capturePausedForFocus = false;
+    bool wasOverlayOpen = false;
     bool stopLatched = false;
     float fps = 0;
     Size lastCs{};
@@ -249,6 +250,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (!running) break;
 
       pollOverlayToggle(spec);
+      const bool overlayOpenNow = isOverlayOpen();
+      // Closing the overlay is an intentional handoff back to the game.
+      // The overlay's popup can briefly remain the foreground HWND while the
+      // game receives focus; don't interpret that transient as Alt-Tab.
+      if (wasOverlayOpen && !overlayOpenNow) {
+        SetForegroundWindow(target);
+        setOutputFullscreen(out, mon);
+        overlaySetOpen(false); // reassert FPS HUD z-order after raising output
+      }
+      wasOverlayOpen = overlayOpenNow;
       pollBindBypass(out, spec);
       overlayConsumeFrameLimitToggle();
       const auto limitCfg = overlayFrameLimitConfig();
@@ -292,7 +303,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (!fgRoot) fgRoot = GetAncestor(fg, GA_ROOT);
         HWND targetRoot = GetAncestor(target, GA_ROOTOWNER);
         if (!targetRoot) targetRoot = GetAncestor(target, GA_ROOT);
-        return fg == target || fgRoot == targetRoot || fgRoot == target || fg == targetRoot;
+        // The NRLive output/overlay may transiently own foreground during
+        // close; it is not a real focus loss. Treat it as a handoff only while
+        // the overlay was just closed (the explicit foreground restore above).
+        HWND outRoot = GetAncestor(out, GA_ROOTOWNER);
+        if (!outRoot) outRoot = GetAncestor(out, GA_ROOT);
+        const bool outputOwnsForeground = fg == out || fgRoot == outRoot;
+        return fg == target || fgRoot == targetRoot || fgRoot == target ||
+               fg == targetRoot || (outputOwnsForeground && overlayOpenNow);
       };
       const bool shouldPauseCapture = !isOverlayOpen() && !isTargetForeground();
       if (shouldPauseCapture && !capturePausedForFocus) {
