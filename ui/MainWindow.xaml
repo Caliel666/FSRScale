@@ -1,0 +1,148 @@
+<Window x:Class="NRLiveUI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="NRLive" Width="1000" Height="720" MinWidth="900" MinHeight="640"
+        WindowStartupLocation="CenterScreen" Background="{StaticResource BgBrush}"
+        Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI Variable Text, Segoe UI"
+        Loaded="Window_Loaded" Closing="Window_Closing">
+    <Grid Margin="18">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="205"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Border Grid.Column="0" Background="#1C1F24" CornerRadius="14" Padding="14">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Top">
+                    <StackPanel Orientation="Horizontal" Margin="4,5,0,22">
+                        <Border Width="34" Height="34" CornerRadius="10" Background="{StaticResource AccentBrush}" VerticalAlignment="Center">
+                            <TextBlock Text="N" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#17131C"/>
+                        </Border>
+                        <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="NRLive" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBlock Text="WINDOW SCALER" FontSize="9" Foreground="{StaticResource MutedBrush}" CharacterSpacing="90"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock Text="PROFILES" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,8" CharacterSpacing="120"/>
+                    <ComboBox x:Name="ProfileBox" SelectionChanged="ProfileBox_SelectionChanged" Margin="0,0,0,8"/>
+                    <Button Content="Save profile" Click="SaveProfile_Click" HorizontalAlignment="Stretch"/>
+                    <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,20,0,18"/>
+                    <TextBlock Text="QUICK START" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,10" CharacterSpacing="120"/>
+                    <TextBlock Text="1. Choose the target window." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,0,0,8"/>
+                    <TextBlock Text="2. Press Scale and switch to your game during the countdown." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,0,0,8"/>
+                    <TextBlock Text="3. Press Unscale or the toggle hotkey to stop." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,0,0,8"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom" Margin="2,14,2,2">
+                    <Border Background="#25282E" CornerRadius="10" Padding="11">
+                        <StackPanel>
+                            <TextBlock Text="GLOBAL TOGGLE" FontSize="10" Foreground="{StaticResource MutedBrush}" CharacterSpacing="80"/>
+                            <TextBlock x:Name="SidebarHotkey" Text="Ctrl + Alt + S" FontSize="14" FontWeight="SemiBold" Margin="0,5,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="NRLive • Windows 11" FontSize="10" Foreground="{StaticResource MutedBrush}" Margin="4,13,0,0"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid Grid.Row="0" Margin="2,0,0,18">
+                <StackPanel>
+                    <TextBlock x:Name="ProfileTitle" Text="Scaling setup" FontSize="26" FontWeight="SemiBold"/>
+                    <TextBlock Text="Capture a window, sharpen the output, and tune your motion-vector path." Foreground="{StaticResource MutedBrush}" FontSize="13" Margin="0,5,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="18" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="SCALING SESSION" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold" CharacterSpacing="100"/>
+                                <TextBlock Text="Ready when you are" FontSize="20" FontWeight="SemiBold" Margin="0,6,0,4"/>
+                                <TextBlock x:Name="StatusText" Text="Press Scale, then switch to the game before the countdown ends." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MaxWidth="470"/>
+                            </StackPanel>
+                            <Button x:Name="ScaleButton" Grid.Column="1" Content="Scale  →" Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" Foreground="#17131C" FontWeight="SemiBold" FontSize="15" Padding="18,14" VerticalAlignment="Center" Click="ScaleButton_Click"/>
+                        </Grid>
+                    </Border>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Text="Target window" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                                    <TextBlock Text="Capture mode" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                    <ComboBox x:Name="TargetModeBox" SelectedIndex="0" Margin="0,0,0,12">
+                                        <ComboBoxItem Content="Picker countdown"/>
+                                        <ComboBoxItem Content="Foreground window"/>
+                                        <ComboBoxItem Content="Process ID"/>
+                                        <ComboBoxItem Content="Process name / regex"/>
+                                        <ComboBoxItem Content="Window title / regex"/>
+                                    </ComboBox>
+                                    <TextBlock Text="PID / process regex / window title" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                    <TextBox x:Name="TargetTextBox" Text="" ToolTip="Used for PID, process name, or window title modes" Margin="0,0,0,12"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Countdown (seconds)" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                            <TextBox x:Name="DelayBox" Text="5"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="HUD" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                            <CheckBox x:Name="HudCheckBox" Content="Enabled" IsChecked="True" Margin="0,8,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="16">
+                                <StackPanel>
+                                    <TextBlock Text="Motion vectors" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                    <TextBlock Text="FastMV is the default low-overhead path. AMDOF remains available." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,12"/>
+                                    <ComboBox x:Name="MotionBox" SelectedIndex="0">
+                                        <ComboBoxItem Content="FastMV (default)"/>
+                                        <ComboBoxItem Content="AMDOF optical flow"/>
+                                    </ComboBox>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,7">
+                                        <TextBlock Text="FSR sharpening" FontSize="16" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="SharpnessValue" Text="0.65" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold"/>
+                                    </Grid>
+                                    <TextBlock Text="Native FSR sharpness. Increase it to compensate for a soft-looking upscale." Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,14"/>
+                                    <Slider x:Name="SharpnessSlider" Minimum="0" Maximum="1" Value="0.65" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="SharpnessSlider_ValueChanged"/>
+                                    <Grid Margin="0,5,0,0"><TextBlock Text="Off" Foreground="{StaticResource MutedBrush}" FontSize="10"/><TextBlock Text="Crisp" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" FontSize="10"/></Grid>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Text="Hotkeys" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                    <TextBlock Text="Scale / Unscale toggle" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                    <TextBox x:Name="ScaleHotkeyBox" Text="ctrl+alt+s" Margin="0,0,0,10" LostFocus="ScaleHotkeyBox_LostFocus"/>
+                                    <TextBlock Text="NRLive stop key" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                    <TextBox x:Name="StopHotkeyBox" Text="ctrl+shift+a" Margin="0,0,0,10"/>
+                                    <TextBlock Text="Overlay toggle key" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                    <TextBox x:Name="OverlayHotkeyBox" Text="ctrl+home"/>
+                                    <TextBlock Text="Toggle hotkey must differ from NRLive's stop and overlay keys." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="16">
+                                <StackPanel>
+                                    <TextBlock Text="Executable" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                    <TextBox x:Name="ExePathBox" Text="NRLive.exe" Margin="0,0,0,8"/>
+                                    <Button Content="Browse for NRLive.exe…" Click="BrowseExe_Click" HorizontalAlignment="Left"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                    <Border Background="#1B1E23" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,14,0,0">
+                        <TextBlock x:Name="CommandPreview" Text="NRLive.exe --mv fast --sharpness 0.65" FontFamily="Cascadia Code, Consolas" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+            <Grid Grid.Row="2" Margin="2,14,2,0">
+                <TextBlock x:Name="FooterStatus" Text="Ready" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center"/>
+                <TextBlock Text="FSR SDK 2.3.0 • DX12" Foreground="{StaticResource MutedBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
