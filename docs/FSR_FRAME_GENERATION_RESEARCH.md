@@ -42,4 +42,4 @@ This is a design target, not a claim that every third-party hook currently execu
 - The base-frame cap controls source cadence while FG controls generated presentation cadence independently.
 - Test scrolling text, thin geometry, HUD elements, rapid camera movement, and disocclusions.
 
-Until those gates pass, this branch intentionally ships no frame-generation runtime functionality.
+Until those gates pass, this branch intentionally ships no frame-generation runtime functionality. The current CI build verifies the UI placeholder and documentation only; it does not validate generated frames.
