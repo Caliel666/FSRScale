@@ -278,6 +278,7 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
   m_display = display;
   m_frameId = 0;
   m_callbackEnabled = false;
+  m_pendingReset = true;
   m_failed = false;
   m_error = L"FSR FG ready; AMD frame-interpolation swapchain active [" + g_info + L"]";
   return true;
@@ -296,7 +297,10 @@ ffxReturnCode_t FsrFrameGeneration::generationCallback(
   // disabled after configuration, leave the ordinary present path intact.
   if (!self->m_callbackEnabled)
     return FFX_API_RETURN_OK;
+  params->reset = params->reset || self->m_pendingReset;
   const ffxReturnCode_t rc = g_ffx.Dispatch(&self->m_ctx, &params->header);
+  if (rc == FFX_API_RETURN_OK)
+    self->m_pendingReset = false;
   if (rc != FFX_API_RETURN_OK) {
     self->m_failed = true;
     self->m_callbackEnabled = false;
@@ -340,6 +344,7 @@ bool FsrFrameGeneration::resize(Size maxRender, Size display)
     g_ffx.DestroyContext(&m_ctx, nullptr);
   m_ctx = resizedCtx;
   m_callbackEnabled = false;
+  m_pendingReset = true;
   m_failed = false;
   m_maxRender = maxRender;
   m_display = display;
@@ -394,6 +399,7 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
   }
 
   m_callbackEnabled = false;
+  m_pendingReset = enabled && reset;
   if (enabled) {
     ffxDispatchDescFrameGenerationPrepareCameraInfo camera{};
     camera.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_CAMERAINFO;
@@ -447,6 +453,8 @@ void FsrFrameGeneration::shutdown()
 {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_callbackEnabled = false;
+  m_pendingReset = true;
+  m_failed = false;
   if (m_ctx && g_ffx.DestroyContext)
     g_ffx.DestroyContext(&m_ctx, nullptr);
   m_ctx = nullptr;

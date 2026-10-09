@@ -64,6 +64,7 @@ private:
   Size m_display{};
   uint64_t m_frameId = 0;
   bool m_callbackEnabled = false;
+  bool m_pendingReset = true;
   bool m_failed = false;
   mutable std::mutex m_mutex;
   std::wstring m_error;
