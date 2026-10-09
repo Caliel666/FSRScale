@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private Process? _process;
     private int _secondsLeft;
     private bool _loadingProfile;
+    private bool _initialized;
     private bool _registeredHotkey;
     private string _currentProfile = "Default";
     private string Root => AppContext.BaseDirectory;
@@ -45,7 +46,6 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _timer.Tick += Timer_Tick;
-        SharpnessSlider.ValueChanged += SharpnessSlider_ValueChanged;
         TargetModeBox.SelectionChanged += (_, _) => UpdatePreview();
         MotionBox.SelectionChanged += (_, _) => UpdatePreview();
         DelayBox.TextChanged += (_, _) => UpdatePreview();
@@ -85,6 +85,7 @@ public partial class MainWindow : Window
         catch { }
         ProfileBox.SelectedItem = names.Contains(preferred) ? preferred : "Default";
         if (ProfileBox.SelectedItem == null) LoadProfile("Default");
+        _initialized = true;
         _source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
         _source?.AddHook(WndProc);
         RegisterToggleHotkey();
@@ -94,6 +95,7 @@ public partial class MainWindow : Window
     private void ProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loadingProfile || ProfileBox.SelectedItem is not string name) return;
+        if (!_initialized) { LoadProfile(name); return; }
         SaveCurrentProfile(false);
         LoadProfile(name);
     }
@@ -178,7 +180,7 @@ public partial class MainWindow : Window
             _registeredHotkey = false;
         }
         string toggle = ScaleHotkeyBox.Text.Trim();
-        if (SameHotkey(toggle, StopHotkeyBox.Text) || SameHotkey(toggle, OverlayHotkeyBox.Text))
+        if (SameHotkey(toggle, StopHotkeyBox.Text) || SameHotkey(toggle, OverlayHotkeyBox.Text) || SameHotkey(StopHotkeyBox.Text, OverlayHotkeyBox.Text))
         {
             FooterStatus.Text = "Toggle hotkey conflicts with NRLive's stop or overlay key.";
             return;
@@ -245,7 +247,7 @@ public partial class MainWindow : Window
     {
         SaveCurrentProfile(false);
         var p = ReadProfile();
-        if (SameHotkey(p.scale_hotkey, p.stop_key) || SameHotkey(p.scale_hotkey, p.overlay_key))
+        if (SameHotkey(p.scale_hotkey, p.stop_key) || SameHotkey(p.scale_hotkey, p.overlay_key) || SameHotkey(p.stop_key, p.overlay_key))
         {
             MessageBox.Show(this, "The Scale / Unscale hotkey must differ from both the NRLive stop key and overlay key.", "Hotkey conflict", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
@@ -258,7 +260,7 @@ public partial class MainWindow : Window
         }
         if (p.target_mode == "pid" && !uint.TryParse(p.target_text, out _)) { MessageBox.Show(this, "Enter a numeric process ID.", "Target", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
         if ((p.target_mode == "pname" || p.target_mode == "window") && string.IsNullOrWhiteSpace(p.target_text)) { MessageBox.Show(this, "Enter a process name or window-title regex.", "Target", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
-        if (!TryParseHotkey(p.stop_key, out _, out _) || !TryParseHotkey(p.overlay_key, out _, out _))
+        if (!TryParseHotkey(p.scale_hotkey, out _, out _) || !TryParseHotkey(p.stop_key, out _, out _) || !TryParseHotkey(p.overlay_key, out _, out _))
         {
             MessageBox.Show(this, "The NRLive stop and overlay hotkeys must be valid combinations.", "Hotkey", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
