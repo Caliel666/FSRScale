@@ -100,20 +100,35 @@ jobs:
             if (-not (Test-Path "build/Release/$dll")) { throw "$dll was not staged beside NRLive.exe." }
           }
 
-      - name: Publish Windows 11 launcher
+      - name: Publish and assemble portable launcher package
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          dotnet publish ui/NRLiveUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o build/ui
-          if (-not (Test-Path "build/ui/NRLiveUI.exe")) { throw "NRLiveUI.exe was not produced." }
+          $package = "build/package"
+          dotnet publish ui/NRLiveUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $package
+          if (-not (Test-Path "$package/NRLiveUI.exe")) { throw "NRLiveUI.exe was not produced." }
 
-      - name: Upload build
+          # The launcher resolves NRLive.exe and the FSR provider DLLs relative
+          # to its own directory. Keep the entire runnable application flat.
+          Copy-Item "build/Release/NRLive.exe" $package -Force
+          Copy-Item "build/Release/amd_fidelityfx_loader_dx12.dll" $package -Force
+          Copy-Item "build/Release/amd_fidelityfx_framegeneration_dx12.dll" $package -Force
+          Copy-Item "build/Release/amd_fidelityfx_upscaler_dx12.dll" $package -Force
+
+          foreach ($file in @(
+            "NRLiveUI.exe",
+            "NRLive.exe",
+            "amd_fidelityfx_loader_dx12.dll",
+            "amd_fidelityfx_framegeneration_dx12.dll",
+            "amd_fidelityfx_upscaler_dx12.dll"
+          )) {
+            if (-not (Test-Path (Join-Path $package $file))) { throw "Portable package is missing $file" }
+          }
+          Get-ChildItem $package | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Upload portable Windows package
         uses: actions/upload-artifact@v4
         with:
           name: NRLive-windows-x64-fsr-sdk-2.3.0
-          path: |
-            build/Release/NRLive.exe
-            build/ui/NRLiveUI.exe
-            build/Release/amd_fidelityfx_loader_dx12.dll
-            build/Release/amd_fidelityfx_framegeneration_dx12.dll
-            build/Release/amd_fidelityfx_upscaler_dx12.dll
+          path: build/package/**
+          if-no-files-found: error
