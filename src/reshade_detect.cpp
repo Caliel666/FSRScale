@@ -7,13 +7,7 @@ bool hasReShadeExports(const std::wstring& path)
 {
   // Load the image without running DllMain. We only inspect the public export
   // table; the module is immediately unloaded after the query.
-  HMODULE image = LoadLibraryExW(path.c_str(), nullptr,
-      DONT_RESOLVE_DLL_REFERENCES | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
-  if (!image) {
-    // LOAD_LIBRARY_AS_IMAGE_RESOURCE can prevent GetProcAddress on some
-    // Windows versions, so retry with the standard non-executing mapping.
-    image = LoadLibraryExW(path.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
-  }
+  HMODULE image = LoadLibraryExW(path.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
   if (!image) return false;
   const bool hasRegister = GetProcAddress(image, "ReShadeRegisterAddon") != nullptr;
   const bool hasUnregister = GetProcAddress(image, "ReShadeUnregisterAddon") != nullptr;
