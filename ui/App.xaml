@@ -79,7 +79,7 @@
                                    Value="{TemplateBinding Value}"
                                    ViewportSize="{TemplateBinding ViewportSize}"
                                    Orientation="{TemplateBinding Orientation}"
-                                   IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+                                   IsDirectionReversed="True">
                                 <Track.Thumb>
                                     <Thumb>
                                         <Thumb.Template>
