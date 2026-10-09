@@ -226,6 +226,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     FrameLimiter frameLimiter;
     bool reset = true, running = true;
+    bool capturePausedForFocus = false;
     bool stopLatched = false;
     float fps = 0;
     Size lastCs{};
@@ -279,6 +280,44 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (!stopLatched) { running = false; break; }
         stopLatched = true;
       } else stopLatched = false;
+
+      // The output is fullscreen/topmost, so merely stopping frame acquisition
+      // leaves it covering the application selected by Alt-Tab. Hide it on focus
+      // loss, stop WGC, then recreate the capture session on return. Overlay mode
+      // is exempt because interacting with it intentionally takes focus from game.
+      auto isTargetForeground = [&]() {
+        HWND fg = GetForegroundWindow();
+        if (!fg) return false;
+        HWND fgRoot = GetAncestor(fg, GA_ROOTOWNER);
+        if (!fgRoot) fgRoot = GetAncestor(fg, GA_ROOT);
+        HWND targetRoot = GetAncestor(target, GA_ROOTOWNER);
+        if (!targetRoot) targetRoot = GetAncestor(target, GA_ROOT);
+        return fg == target || fgRoot == targetRoot || fgRoot == target || fg == targetRoot;
+      };
+      const bool shouldPauseCapture = !isOverlayOpen() && !isTargetForeground();
+      if (shouldPauseCapture && !capturePausedForFocus) {
+        gfx.waitForGpu();
+        cap.stop();
+        ShowWindow(out, SW_HIDE);
+        capturePausedForFocus = true;
+        continue;
+      }
+      if (shouldPauseCapture) {
+        Sleep(8);
+        continue;
+      }
+      if (capturePausedForFocus) {
+        if (!cap.start(target)) {
+          Sleep(8);
+          continue;
+        }
+        setOutputFullscreen(out, mon);
+        ShowWindow(out, SW_SHOWNOACTIVATE);
+        capturePausedForFocus = false;
+        reset = true;
+        QueryPerformanceCounter(&lastCaptured);
+        continue; // let WGC deliver a fresh frame before rendering
+      }
 
       if (frameLimiter.enabled() && frameLimiter.method() == 0)
         frameLimiter.wait(); // early mode: pace before capture/CPU preparation
