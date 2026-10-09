@@ -18,6 +18,7 @@
 #include <thread>
 #include <stdexcept>
 #include <fstream>
+#include <cstring>
 
 static std::wstring logDirectory()
 {
