@@ -4,6 +4,7 @@
 #include <shlobj.h>
 #include <filesystem>
 #include <stdexcept>
+#include <algorithm>
 
 static void hr(HRESULT x) { if (FAILED(x)) throw std::runtime_error("D3D12 failure"); }
 
