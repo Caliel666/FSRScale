@@ -8,5 +8,6 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>NRLiveUI</AssemblyName>
     <RootNamespace>NRLiveUI</RootNamespace>
+    <ApplicationIcon>img\Icon.png</ApplicationIcon>
   </PropertyGroup>
 </Project>
