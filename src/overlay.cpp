@@ -688,5 +688,7 @@ void overlayUpdate(float fps, float ms, Size cap, Size out) {
 void overlaySetFsrEnabled(bool e) { g_fsr = e; if (g_ui) InvalidateRect(g_ui, nullptr, FALSE); }
 bool overlayConsumeFsrToggle() { bool v = g_toggleFsr; g_toggleFsr = false; return v; }
 bool overlayConsumeScreenshot() { bool v = g_screenshot; g_screenshot = false; return v; }
+bool overlayConsumeFrameLimitToggle() { bool v = g_toggleFrameLimit; g_toggleFrameLimit = false; return v; }
+OverlayFrameLimitConfig overlayFrameLimitConfig() { return g_frameLimit; }
 const OverlayHudConfig& overlayConfig() { return g_cfg; }
 std::wstring overlayScreenshotPath() { return g_shotPath; }
