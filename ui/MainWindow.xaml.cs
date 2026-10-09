@@ -240,8 +240,13 @@ public partial class MainWindow : Window
 
     private void ToggleScaling()
     {
-        if (_process != null && !_process.HasExited) StopScaling();
-        else StartScaling();
+        if (_process != null)
+        {
+            if (!_process.HasExited) { StopScaling(); return; }
+            _process.Dispose();
+            _process = null;
+        }
+        StartScaling();
     }
 
     private void StartScaling()
@@ -296,10 +301,10 @@ public partial class MainWindow : Window
 
     private void Timer_Tick(object? sender, EventArgs e)
     {
-        if (_process == null || _process.HasExited) { ResetScaling("NRLive exited before scaling became active."); return; }
-        _secondsLeft--;
-        if (_secondsLeft > 0) ScaleButton.Content = $"Starting · {_secondsLeft}";
-        else
+        if (_process == null || _process.HasExited) { ResetScaling("NRLive exited; session stopped."); return; }
+        if (_secondsLeft > 0) _secondsLeft--;
+        if (_secondsLeft > 0) { ScaleButton.Content = $"Starting · {_secondsLeft}"; return; }
+        if (ScaleButton.Content?.ToString()?.StartsWith("Starting", StringComparison.Ordinal) == true)
         {
             ScaleButton.Content = "Unscale  ■";
             ScaleButton.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(194, 73, 91));
