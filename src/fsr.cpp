@@ -298,6 +298,46 @@ ffxReturnCode_t FsrFrameGeneration::generationCallback(
   return rc;
 }
 
+bool FsrFrameGeneration::resize(Size maxRender, Size display)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (!m_swapChainCtx || !g_ffx.CreateContext || !g_ffx.DestroyContext) {
+    m_error = L"FSR FG resize failed: swapchain context unavailable";
+    return false;
+  }
+  m_callbackEnabled = false;
+  if (m_ctx && g_ffx.DestroyContext)
+    g_ffx.DestroyContext(&m_ctx, nullptr);
+  m_ctx = nullptr;
+
+  ffxCreateBackendDX12Desc backend{};
+  backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
+  backend.header.pNext = nullptr;
+  // The backend provider is associated with the same device used by the
+  // existing context. The device is retained by the DX12 backend context.
+  // Recreate only the effect context; do not wrap an already wrapped swapchain.
+  // FFX API contexts share the backend supplied by the initial create chain.
+  backend.device = nullptr;
+  ffxCreateContextDescFrameGeneration fg{};
+  fg.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
+  fg.header.pNext = &backend.header;
+  fg.flags = FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED |
+             FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE;
+  fg.displaySize = { display.w, display.h };
+  fg.maxRenderSize = { maxRender.w, maxRender.h };
+  fg.backBufferFormat = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM;
+  const ffxReturnCode_t rc = g_ffx.CreateContext(&m_ctx, &fg.header, nullptr);
+  if (rc != FFX_API_RETURN_OK || !m_ctx) {
+    m_ctx = nullptr;
+    m_error = L"FSR FG resize context creation failed 0x" + hex((uint32_t)rc);
+    return false;
+  }
+  m_maxRender = maxRender;
+  m_display = display;
+  m_error = L"FSR FG context resized";
+  return true;
+}
+
 bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
                                  ID3D12Resource* depth,
                                  ID3D12Resource* motionVectors,

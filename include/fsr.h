@@ -43,6 +43,7 @@ class FsrFrameGeneration {
 public:
   bool init(ID3D12Device* device, Size maxRender, Size display,
             IDXGISwapChain4** swapChain, ID3D12CommandQueue* queue);
+  bool resize(Size maxRender, Size display);
   bool prepare(ID3D12GraphicsCommandList* cmd,
                ID3D12Resource* depth,
                ID3D12Resource* motionVectors,
