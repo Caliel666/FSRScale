@@ -251,6 +251,7 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
     return false;
   }
   m_swapChain = *swapChain;
+  m_device = device;
 
   ffxCreateBackendDX12Desc backend{};
   backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
@@ -313,11 +314,8 @@ bool FsrFrameGeneration::resize(Size maxRender, Size display)
   ffxCreateBackendDX12Desc backend{};
   backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
   backend.header.pNext = nullptr;
-  // The backend provider is associated with the same device used by the
-  // existing context. The device is retained by the DX12 backend context.
   // Recreate only the effect context; do not wrap an already wrapped swapchain.
-  // FFX API contexts share the backend supplied by the initial create chain.
-  backend.device = nullptr;
+  backend.device = m_device;
   ffxCreateContextDescFrameGeneration fg{};
   fg.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
   fg.header.pNext = &backend.header;
@@ -436,6 +434,7 @@ void FsrFrameGeneration::shutdown()
     g_ffx.DestroyContext(&m_swapChainCtx, nullptr);
   m_swapChainCtx = nullptr;
   m_swapChain = nullptr;
+  m_device = nullptr;
   m_maxRender = {};
   m_display = {};
   m_frameId = 0;

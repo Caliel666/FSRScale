@@ -57,6 +57,7 @@ private:
   static ffxReturnCode_t generationCallback(ffxDispatchDescFrameGeneration* params, void* userCtx);
   ffxContext m_ctx = nullptr;
   ffxContext m_swapChainCtx = nullptr;
+  ID3D12Device* m_device = nullptr; // retained by Graphics for the lifetime of the context
   IDXGISwapChain4* m_swapChain = nullptr;
   Size m_maxRender{};
   Size m_display{};
