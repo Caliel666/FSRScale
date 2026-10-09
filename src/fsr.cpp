@@ -457,10 +457,41 @@ bool FsrFrameGeneration::failed() const
 
 void FsrFrameGeneration::shutdown()
 {
+  // The caller stops the render loop and drains NRLive's queue before entering
+  // shutdown. Acquire the same lock as generationCallback so no callback can
+  // be executing against m_ctx while we disable the proxy and destroy contexts.
   std::lock_guard<std::mutex> lock(m_mutex);
   m_callbackEnabled = false;
   m_pendingReset = true;
   m_failed = false;
+
+  if (m_ctx && m_swapChain && g_ffx.Configure) {
+    // Required by FidelityFX: disabling through the proxy flushes interpolation
+    // and UI/present work that may still reference resources owned by m_ctx.
+    // DestroyContext alone does not provide this synchronization and can stall
+    // or trip D3D12 "object deleted while still in use" validation on exit.
+    ffxConfigureDescFrameGeneration config{};
+    config.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
+    config.header.pNext = nullptr;
+    config.swapChain = m_swapChain;
+    config.presentCallback = nullptr;
+    config.presentCallbackUserContext = nullptr;
+    config.frameGenerationCallback = nullptr;
+    config.frameGenerationCallbackUserContext = nullptr;
+    config.frameGenerationEnabled = false;
+    config.allowAsyncWorkloads = false;
+    config.HUDLessColor = {};
+    config.flags = 0;
+    config.onlyPresentGenerated = false;
+    config.generationRect = { 0, 0, (int32_t)m_display.w, (int32_t)m_display.h };
+    config.frameID = m_frameId;
+    const ffxReturnCode_t rc = g_ffx.Configure(&m_ctx, &config.header);
+    if (rc != FFX_API_RETURN_OK)
+      m_error = L"FSR FG shutdown configure failed 0x" + hex((uint32_t)rc);
+  }
+
+  // Destroy the effect context before the wrapper context, then let Graphics
+  // release the wrapped IDXGISwapChain after this method returns.
   if (m_ctx && g_ffx.DestroyContext)
     g_ffx.DestroyContext(&m_ctx, nullptr);
   m_ctx = nullptr;
