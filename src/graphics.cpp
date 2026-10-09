@@ -270,6 +270,25 @@ bool Graphics::buildSwapChain(Size display)
   return true;
 }
 
+void Graphics::releaseSwapChainForWrap()
+{
+  // AMD's frame-interpolation wrapper releases the original swapchain and
+  // recreates it for the same HWND. DXGI requires every backbuffer reference
+  // and every app-owned swapchain interface to be released first.
+  for (auto& b : m_back) b.Reset();
+  m_swap1.Reset();
+  m_swap.Reset();
+  m_index = 0;
+  m_lastBlitSrc = nullptr;
+  m_lastBlitFmt = DXGI_FORMAT_UNKNOWN;
+}
+
+bool Graphics::rebuildSwapChain(Size display)
+{
+  releaseSwapChainForWrap();
+  return buildSwapChain(display);
+}
+
 bool Graphics::adoptSwapChain(IDXGISwapChain4* wrapped)
 {
   if (!wrapped || !m_rtv || !m_dev) return false;
