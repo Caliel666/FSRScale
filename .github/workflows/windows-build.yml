@@ -16,6 +16,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up .NET 8 for the Windows launcher
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
       - name: Download AMD FSR SDK 2.3.0 headers and signed providers
         shell: pwsh
         run: |
@@ -95,12 +100,20 @@ jobs:
             if (-not (Test-Path "build/Release/$dll")) { throw "$dll was not staged beside NRLive.exe." }
           }
 
+      - name: Publish Windows 11 launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          dotnet publish ui/NRLiveUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o build/ui
+          if (-not (Test-Path "build/ui/NRLiveUI.exe")) { throw "NRLiveUI.exe was not produced." }
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
           name: NRLive-windows-x64-fsr-sdk-2.3.0
           path: |
             build/Release/NRLive.exe
+            build/ui/NRLiveUI.exe
             build/Release/amd_fidelityfx_loader_dx12.dll
             build/Release/amd_fidelityfx_framegeneration_dx12.dll
             build/Release/amd_fidelityfx_upscaler_dx12.dll
