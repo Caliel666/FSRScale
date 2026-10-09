@@ -31,8 +31,7 @@ void FrameLimiter::wait() {
   LARGE_INTEGER now{};
   QueryPerformanceCounter(&now);
   const LONGLONG interval = std::max<LONGLONG>(
-      1, (m_frequency.QuadPart * 1000000LL) /
-             static_cast<LONGLONG>(m_fps));
+      1, m_frequency.QuadPart / static_cast<LONGLONG>(m_fps));
 
   if (!m_hasDeadline) {
     m_deadline.QuadPart = now.QuadPart + interval;
