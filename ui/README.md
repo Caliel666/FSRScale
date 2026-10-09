@@ -25,4 +25,4 @@ The global toggle must differ from NRLive's stop key (`Ctrl+Shift+A` by default)
 
 ## Settings
 
-Profiles are JSON files under `profiles\`. The sharpening slider controls the native FSR upscaler sharpness value (0–1). FastMV is the default motion-vector implementation; AMDOF remains selectable.
+Profiles are JSON files under `profiles\`. FSR sharpening is configured from the in-game NRLive overlay menu and persisted to scaleconfig.ini. FastMV is the default motion-vector implementation; AMDOF remains selectable.
