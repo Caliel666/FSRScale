@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 static void hr(HRESULT x)
