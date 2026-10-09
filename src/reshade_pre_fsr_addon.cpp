@@ -3,6 +3,8 @@
 #include <d3d12.h>
 #include <reshade.hpp>
 #include <algorithm>
+#include <cwchar>
+#include <iterator>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -66,12 +68,20 @@ void onDestroyEffectRuntime(effect_runtime *runtime)
 void onBindRenderTargets(command_list *cmd, uint32_t count,
                          const resource_view *rtvs, resource_view)
 {
+  const resource_view current = (count != 0 && rtvs != nullptr) ? rtvs[0] : resource_view{ 0 };
   resource_view previous{};
   {
     std::lock_guard<std::mutex> lock(g_mutex);
     const auto it = g_boundRtvs.find(cmd);
     if (it != g_boundRtvs.end())
       previous = it->second;
+
+    // Update before rendering effects: render_effects itself binds render
+    // targets and therefore re-enters this event callback.
+    if (current == 0)
+      g_boundRtvs.erase(cmd);
+    else
+      g_boundRtvs[cmd] = current;
   }
 
   // The app explicitly unbinds the pre-FSR target after its source-color blit.
@@ -90,14 +100,14 @@ void onBindRenderTargets(command_list *cmd, uint32_t count,
       reshade::log::message(reshade::log::level::warning,
         "NRLive: pre-FSR target found, but no matching ReShade runtime is available.");
     }
-  }
 
-  const resource_view current = (count != 0 && rtvs != nullptr) ? rtvs[0] : resource_view{ 0 };
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (current == 0)
-    g_boundRtvs.erase(cmd);
-  else
-    g_boundRtvs[cmd] = current;
+    // Ignore any transient render-target binds performed by the effects runtime.
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (current == 0)
+      g_boundRtvs.erase(cmd);
+    else
+      g_boundRtvs[cmd] = current;
+  }
 }
 
 void onDestroyCommandList(command_list *cmd)
