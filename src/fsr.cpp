@@ -4,6 +4,7 @@
 #include <cfloat>
 #include <mutex>
 #include <string>
+#include <fstream>
 
 // CRITICAL for OptiScaler:
 // Call ffxCreateContext / ffxDispatch ONLY through the module OptiScaler hooks
@@ -30,6 +31,14 @@ static std::wstring exeDir()
   auto s = d.find_last_of(L"\\/");
   if (s != std::wstring::npos) d.resize(s + 1);
   return d;
+}
+
+static std::mutex g_logMutex;
+static void logFfx(const std::wstring& message)
+{
+  std::lock_guard<std::mutex> lock(g_logMutex);
+  std::wofstream file(exeDir() + L"NRLive-fg.log", std::ios::out | std::ios::app);
+  if (file) file << message << L"\n";
 }
 
 static bool resolve(HMODULE m)
@@ -236,6 +245,7 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
       !g_ffx.CreateContext || !g_ffx.Dispatch || !g_ffx.DestroyContext ||
       !g_ffx.Configure || !g_ffx.Query) {
     m_error = L"FSR FG API unavailable (missing FFX context, query, dispatch or configure entry points)";
+    logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
     return false;
   }
   ffxCreateContextDescFrameGenerationSwapChainWrapDX12 wrap{};
@@ -246,6 +256,7 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
   ffxReturnCode_t rc = g_ffx.CreateContext(&m_swapChainCtx, &wrap.header, nullptr);
   if (rc != FFX_API_RETURN_OK || !m_swapChainCtx || !*swapChain) {
     m_error = L"FSR FG swapchain wrapping failed 0x" + hex((uint32_t)rc);
+    logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
     if (m_swapChainCtx) g_ffx.DestroyContext(&m_swapChainCtx, nullptr);
     m_swapChainCtx = nullptr;
     return false;
@@ -268,6 +279,7 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
   rc = g_ffx.CreateContext(&m_ctx, &fg.header, nullptr);
   if (rc != FFX_API_RETURN_OK || !m_ctx) {
     m_error = L"FSR FG context creation failed 0x" + hex((uint32_t)rc);
+    logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
     if (m_swapChainCtx) g_ffx.DestroyContext(&m_swapChainCtx, nullptr);
     m_swapChainCtx = nullptr;
     m_swapChain = nullptr;
@@ -281,6 +293,7 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
   m_pendingReset = true;
   m_failed = false;
   m_error = L"FSR FG ready; AMD frame-interpolation swapchain active [" + g_info + L"]";
+  logFfx(L"FG init OK; selected FFX module=" + g_info);
   return true;
 }
 
@@ -305,6 +318,7 @@ ffxReturnCode_t FsrFrameGeneration::generationCallback(
     self->m_failed = true;
     self->m_callbackEnabled = false;
     self->m_error = L"FSR FG generation callback failed 0x" + hex((uint32_t)rc);
+    logFfx(self->m_error + L"; frameId=" + std::to_wstring(params->frameID));
   }
   return rc;
 }
@@ -400,6 +414,7 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
   ffxReturnCode_t rc = g_ffx.Configure(&m_ctx, &config.header);
   if (rc != FFX_API_RETURN_OK) {
     m_error = L"FSR FG configure failed 0x" + hex((uint32_t)rc);
+    logFfx(m_error + L"; frameId=" + std::to_wstring(frameId));
     m_callbackEnabled = false;
     return false;
   }
@@ -486,8 +501,12 @@ void FsrFrameGeneration::shutdown()
     config.generationRect = { 0, 0, (int32_t)m_display.w, (int32_t)m_display.h };
     config.frameID = m_frameId;
     const ffxReturnCode_t rc = g_ffx.Configure(&m_ctx, &config.header);
-    if (rc != FFX_API_RETURN_OK)
+    if (rc != FFX_API_RETURN_OK) {
       m_error = L"FSR FG shutdown configure failed 0x" + hex((uint32_t)rc);
+      logFfx(m_error);
+    } else {
+      logFfx(L"FG shutdown configure succeeded; contexts will now be destroyed");
+    }
   }
 
   // Destroy the effect context before the wrapper context, then let Graphics
