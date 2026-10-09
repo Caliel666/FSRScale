@@ -4,8 +4,16 @@
 #include <shlobj.h>
 #include <filesystem>
 #include <stdexcept>
+#include <cstdio>
 
-static void hr(HRESULT x) { if (FAILED(x)) throw std::runtime_error("D3D12 failure"); }
+static void hr(HRESULT x)
+{
+  if (FAILED(x)) {
+    char message[64]{};
+    sprintf_s(message, "D3D12 failure HRESULT=0x%08lX", static_cast<unsigned long>(x));
+    throw std::runtime_error(message);
+  }
+}
 
 // Fullscreen triangle, sample texture, write to RTV. Handles any src size.
 static const char* kBlitHlsl = R"(
