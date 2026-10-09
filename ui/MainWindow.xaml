@@ -104,17 +104,6 @@
                         <StackPanel Grid.Column="2">
                             <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,14">
                                 <StackPanel>
-                                    <Grid Margin="0,0,0,7">
-                                        <TextBlock Text="FSR sharpening" FontSize="16" FontWeight="SemiBold"/>
-                                        <TextBlock x:Name="SharpnessValue" Text="0.65" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold"/>
-                                    </Grid>
-                                    <TextBlock Text="Native FSR sharpness. Increase it to compensate for a soft-looking upscale." Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,14"/>
-                                    <Slider x:Name="SharpnessSlider" Minimum="0" Maximum="1" Value="0.65" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="SharpnessSlider_ValueChanged"/>
-                                    <Grid Margin="0,5,0,0"><TextBlock Text="Off" Foreground="{StaticResource MutedBrush}" FontSize="10"/><TextBlock Text="Crisp" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" FontSize="10"/></Grid>
-                                </StackPanel>
-                            </Border>
-                            <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,14">
-                                <StackPanel>
                                     <TextBlock Text="Hotkeys" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
                                     <TextBlock Text="Scale / Unscale toggle" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
                                     <TextBox x:Name="ScaleHotkeyBox" Text="ctrl+alt+s" Margin="0,0,0,10" LostFocus="ScaleHotkeyBox_LostFocus"/>
