@@ -254,12 +254,26 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     // Create the actual AMD FSR Frame Generation context. The overlay toggle
     // remains off unless the provider initializes successfully.
     FsrFrameGeneration fg;
+    // Give the wrapper one owned reference, then drop every reference held by
+    // Graphics before AMD destroys/recreates the swapchain. Keeping m_back[] or
+    // m_swap1 alive here makes the SDK's swapchain replacement fail at runtime.
     IDXGISwapChain4* fgSwapChain = gfx.swapChain();
+    if (fgSwapChain) fgSwapChain->AddRef();
+    gfx.releaseSwapChainForWrap();
     bool fgOk = fg.init(gfx.device(), render, display, &fgSwapChain, gfx.queue());
     logMain(fgOk ? L"FSR frame generation init OK: " + fg.lastError() : L"FSR frame generation init FAILED: " + fg.lastError());
-    if (fgOk && fgSwapChain != gfx.swapChain() && !gfx.adoptSwapChain(fgSwapChain)) {
+    if (fgOk && !gfx.adoptSwapChain(fgSwapChain)) {
       fg.shutdown();
       fgOk = false;
+      logMain(L"FSR FG wrapped swapchain adoption failed; rebuilding ordinary swapchain");
+    }
+    if (!fgOk) {
+      // Failed wrap/context creation may have consumed or invalidated the
+      // original DXGI swapchain pointer. Recreate a clean ordinary swapchain
+      // so capture/upscaling remain usable without frame generation.
+      if (!gfx.rebuildSwapChain(display))
+        throw std::runtime_error("could not rebuild DXGI swapchain after FSR FG initialization failed");
+      logMain(L"Ordinary swapchain rebuilt after FSR FG failure");
     }
     bool fgEnabled = fgOk && overlayFgEnabled();
     overlaySetFgEnabled(fgEnabled);
