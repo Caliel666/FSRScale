@@ -596,7 +596,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     // SCREENSHOT section
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 302, 100, 22, g_settings, (HMENU)106, inst, nullptr);
      CreateWindowW(L"STATIC", L"Cap FPS", WS_CHILD|WS_VISIBLE|SS_LEFT, 142, 304, 52, 18, g_settings, nullptr, inst, nullptr);
-     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"60", WS_CHILD|WS_VISIBLE|ES_NUMBER|ES_AUTOHSCROLL, 196, 300, 58, 24, g_settings, (HMENU)206, inst, nullptr);
+     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD|WS_VISIBLE|ES_NUMBER|ES_AUTOHSCROLL, 196, 300, 58, 24, g_settings, (HMENU)206, inst, nullptr);
      HWND methodBox = CreateWindowW(L"COMBOBOX", L"", WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL, 266, 300, 188, 120, g_settings, (HMENU)207, inst, nullptr);
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Early - smoother");
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Late - snappier");
