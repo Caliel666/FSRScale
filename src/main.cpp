@@ -572,9 +572,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
-        //   color:   COMMON  -> PS|NPS   (FSR & AMDOF read as SRV)
-        //   depth:   UAV     -> PS|NPS   (FSR reads as SRV)
-        //   upscale: NPS     -> UAV      (FSR writes as UAV)
+        //   color:   already PS|NPS (transitioned before optional ReShade stage)
+        //   depth:   UAV -> PS|NPS (FSR reads as SRV)
+        //   upscale: NPS -> UAV (FSR writes as UAV)
         // (mv stays in UAV — AMDOF writes it; AMDOF will leave it in PS|NPS
         //  so FSR can read it directly without an extra barrier.)
         {
@@ -665,8 +665,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
           cmd->ResourceBarrier(n, b);
         }
       } else {
-        // FSR disabled — still need to flip color COMMON→PS|NPS→COMMON and
-        // backbuffer PRESENT→RTV for the blit.  Batch them.
+        // FSR disabled — color is already PS|NPS from the shared pre-stage
+        // setup; only the backbuffer needs PRESENT→RTV for the final blit.
         D3D12_RESOURCE_BARRIER b[2]{};
         int n = 0;
         auto tr = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES a, D3D12_RESOURCE_STATES s) {
