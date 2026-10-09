@@ -10,7 +10,9 @@ static void hr(HRESULT x) { if (FAILED(x)) throw std::runtime_error("D3D12 failu
 // Fullscreen triangle, sample texture, write to RTV. Handles any src size.
 static const char* kBlitHlsl = R"(
 Texture2D    Tex : register(t0);
+Texture2D    Prev : register(t1);
 SamplerState Samp : register(s0);
+cbuffer BlendConstants : register(b0) { float blend; };
 
 struct VSOut {
   float4 pos : SV_Position;
@@ -25,7 +27,7 @@ VSOut VSMain(uint id : SV_VertexID) {
 }
 
 float4 PSMain(VSOut i) : SV_Target {
-  return Tex.SampleLevel(Samp, i.uv, 0);
+  return lerp(Prev.SampleLevel(Samp, i.uv, 0), Tex.SampleLevel(Samp, i.uv, 0), blend);
 }
 )";
 
@@ -45,11 +47,16 @@ bool Graphics::createBlitPipeline()
   range.NumDescriptors = 1;
   range.BaseShaderRegister = 0;
 
-  D3D12_ROOT_PARAMETER param{};
-  param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-  param.DescriptorTable.NumDescriptorRanges = 1;
-  param.DescriptorTable.pDescriptorRanges = &range;
-  param.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+  range.NumDescriptors = 2;
+  D3D12_ROOT_PARAMETER params[2]{};
+  params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+  params[0].DescriptorTable.NumDescriptorRanges = 1;
+  params[0].DescriptorTable.pDescriptorRanges = &range;
+  params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+  params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+  params[1].Constants.ShaderRegister = 0;
+  params[1].Constants.Num32BitValues = 1;
+  params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
   D3D12_STATIC_SAMPLER_DESC samp{};
   samp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -60,8 +67,8 @@ bool Graphics::createBlitPipeline()
   samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
   D3D12_ROOT_SIGNATURE_DESC rsd{};
-  rsd.NumParameters = 1;
-  rsd.pParameters = &param;
+  rsd.NumParameters = 2;
+  rsd.pParameters = params;
   rsd.NumStaticSamplers = 1;
   rsd.pStaticSamplers = &samp;
   rsd.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -96,38 +103,101 @@ bool Graphics::createBlitPipeline()
 void Graphics::blitToBackbuffer(ID3D12Resource* src)
 {
   if (!src || !m_blitPso) return;
-
-  // SRV for src — recreate only when the source resource pointer or format
-  // changes (color and upscale are the only two callers, so this caches
-  // stably most frames).
-  D3D12_RESOURCE_DESC srcDesc = src->GetDesc();
-  if (src != m_lastBlitSrc || srcDesc.Format != m_lastBlitFmt) {
-    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srv.Format = srcDesc.Format;
-    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srv.Texture2D.MipLevels = 1;
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
-    m_dev->CreateShaderResourceView(src, &srv, cpu);
-    m_lastBlitSrc = src;
-    m_lastBlitFmt = srcDesc.Format;
-  }
-
+  const auto desc = src->GetDesc();
+  D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+  srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  srv.Format = desc.Format;
+  srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  srv.Texture2D.MipLevels = 1;
+  auto cpu = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+  m_dev->CreateShaderResourceView(src, &srv, cpu);
+  cpu.ptr += m_srvStride;
+  m_dev->CreateShaderResourceView(src, &srv, cpu);
   ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
   m_cmd->SetDescriptorHeaps(1, heaps);
   m_cmd->SetGraphicsRootSignature(m_blitRs.Get());
   m_cmd->SetPipelineState(m_blitPso.Get());
   m_cmd->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
-
+  const float blend = 1.0f;
+  m_cmd->SetGraphicsRoot32BitConstants(1, 1, &blend, 0);
   D3D12_VIEWPORT vp{ 0, 0, (float)m_display.w, (float)m_display.h, 0, 1 };
   D3D12_RECT sc{ 0, 0, (LONG)m_display.w, (LONG)m_display.h };
   m_cmd->RSSetViewports(1, &vp);
   m_cmd->RSSetScissorRects(1, &sc);
-
   auto rtv = rtvHandle();
   m_cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
   m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   m_cmd->DrawInstanced(3, 1, 0, 0);
+}
+
+void Graphics::blitInterpolatedToBackbuffer(ID3D12Resource* current, float blend)
+{
+  if (!current || !m_frameHistory || !m_historyValid || !m_blitPso) return;
+  auto makeSrv = [&](ID3D12Resource* resource, SIZE_T offset) {
+    const auto desc = resource->GetDesc();
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Format = desc.Format;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Texture2D.MipLevels = 1;
+    auto cpu = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+    cpu.ptr += offset;
+    m_dev->CreateShaderResourceView(resource, &srv, cpu);
+  };
+  makeSrv(current, 0);
+  makeSrv(m_frameHistory.Get(), m_srvStride);
+  ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
+  m_cmd->SetDescriptorHeaps(1, heaps);
+  m_cmd->SetGraphicsRootSignature(m_blitRs.Get());
+  m_cmd->SetPipelineState(m_blitPso.Get());
+  m_cmd->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+  blend = std::clamp(blend, 0.0f, 1.0f);
+  m_cmd->SetGraphicsRoot32BitConstants(1, 1, &blend, 0);
+  D3D12_VIEWPORT vp{ 0, 0, (float)m_display.w, (float)m_display.h, 0, 1 };
+  D3D12_RECT sc{ 0, 0, (LONG)m_display.w, (LONG)m_display.h };
+  m_cmd->RSSetViewports(1, &vp);
+  m_cmd->RSSetScissorRects(1, &sc);
+  auto rtv = rtvHandle();
+  m_cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+  m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  m_cmd->DrawInstanced(3, 1, 0, 0);
+}
+
+bool Graphics::copyBackbufferToHistory()
+{
+  if (!m_frameHistory || !m_back[m_index]) return false;
+  auto* back = m_back[m_index].Get();
+  D3D12_RESOURCE_BARRIER b[2]{};
+  UINT n = 0;
+  auto tr = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
+    b[n].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b[n].Transition.pResource = r;
+    b[n].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b[n].Transition.StateBefore = before;
+    b[n].Transition.StateAfter = after;
+    ++n;
+  };
+  if (m_historyInitialized)
+    tr(m_frameHistory.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+  tr(back, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  m_cmd->ResourceBarrier(n, b);
+  m_cmd->CopyResource(m_frameHistory.Get(), back);
+  D3D12_RESOURCE_BARRIER restore[2]{};
+  UINT rn = 0;
+  auto tr2 = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
+    restore[rn].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    restore[rn].Transition.pResource = r;
+    restore[rn].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    restore[rn].Transition.StateBefore = before;
+    restore[rn].Transition.StateAfter = after;
+    ++rn;
+  };
+  tr2(back, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  tr2(m_frameHistory.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_cmd->ResourceBarrier(rn, restore);
+  m_historyInitialized = true;
+  m_historyValid = true;
+  return true;
 }
 
 bool Graphics::createAuxTextures(Size render)
@@ -224,6 +294,23 @@ bool Graphics::buildSwapChain(Size display)
 
   m_display = display;
   m_index = m_swap->GetCurrentBackBufferIndex();
+
+  m_frameHistory.Reset();
+  m_historyInitialized = false;
+  m_historyValid = false;
+  {
+    D3D12_RESOURCE_DESC hd{};
+    hd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    hd.Width = display.w; hd.Height = display.h;
+    hd.DepthOrArraySize = 1; hd.MipLevels = 1;
+    hd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    hd.SampleDesc.Count = 1;
+    D3D12_HEAP_PROPERTIES hp{};
+    hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+    hp.CreationNodeMask = 1; hp.VisibleNodeMask = 1;
+    hr(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &hd,
+      D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_frameHistory)));
+  }
 
   D3D12_DESCRIPTOR_HEAP_DESC hd{};
   hd.NumDescriptors = 3;
