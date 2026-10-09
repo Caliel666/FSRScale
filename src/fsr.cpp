@@ -506,11 +506,14 @@ void FsrFrameGeneration::shutdown()
   // shutdown. Acquire the same lock as generationCallback so no callback can
   // be executing against m_ctx while we disable the proxy and destroy contexts.
   std::lock_guard<std::mutex> lock(m_mutex);
+  const bool wasCallbackEnabled = m_callbackEnabled;
   m_callbackEnabled = false;
   m_pendingReset = true;
   m_failed = false;
 
-  if (m_ctx && m_swapChain && g_ffx.Configure && m_callbackEnabled) {
+  // Avoid a provider Configure/flush on the common disabled path. If generation
+  // was active, explicitly disable it before destroying the effect context.
+  if (m_ctx && m_swapChain && g_ffx.Configure && wasCallbackEnabled) {
     // Required by FidelityFX: disabling through the proxy flushes interpolation
     // and UI/present work that may still reference resources owned by m_ctx.
     // DestroyContext alone does not provide this synchronization and can stall
