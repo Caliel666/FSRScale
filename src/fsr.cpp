@@ -358,7 +358,7 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
                                  Size render, Size display,
                                  float dt, bool reset, bool enabled)
 {
-  const bool priorFailure = failed();
+  bool priorFailure = failed();
   if (priorFailure) enabled = false;
   if (!m_ctx || !m_swapChainCtx || !g_ffx.Configure || !g_ffx.Dispatch || !cmd) {
     m_error = L"FSR FG prepare skipped: runtime or swapchain unavailable";
@@ -375,6 +375,12 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
   }
 
   std::lock_guard<std::mutex> lock(m_mutex);
+  // Recheck under the same lock used by the Present callback so a late
+  // callback failure cannot race with a new frame re-enabling generation.
+  if (m_failed) {
+    priorFailure = true;
+    enabled = false;
+  }
   const uint64_t frameId = m_frameId;
   ffxConfigureDescFrameGeneration config{};
   config.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
