@@ -5,6 +5,7 @@
 #include <vector>
 #include <cwctype>
 #include <regex>
+#include <cmath>
 
 namespace {
 
@@ -300,7 +301,8 @@ HWND runPicker(HINSTANCE inst, int seconds)
                                 x, y, w, h, nullptr, nullptr, inst, nullptr);
     if (!hwnd) return nullptr;
 
-    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    // The launcher owns the visible countdown. Keep this window hidden while
+    // silently tracking the foreground target so NRLive itself shows no picker HUD.
     SetTimer(hwnd, 1, 100, nullptr);
 
     MSG msg{};
@@ -344,7 +346,8 @@ std::wstring targetUsage()
         L"  NRLive.exe -delay <sec>       wait before starting capture\n"
         L"  NRLive.exe -nooverlay         disable the NRLive HUD overlay\n"
         L"  NRLive.exe --key ctrl+shift+a set the global stop hotkey\n"
-        L"  NRLive.exe --mv amdof|fast    select motion-vector implementation\n"
+        L"  NRLive.exe --mv amdof|fast    select motion-vector implementation (default: fast)\n"
+        L"  NRLive.exe --sharpness 0.65  set native FSR sharpening from 0 to 1\n"
         L"  NRLive.exe --bindbypass home,insert,end,pageup,pagedown\n"
         L"                                  OptiScaler/ReShade menu keys (not sent to game).\n"
         L"                                  Default: Home,Insert,End,PageUp,PageDown.\n"
@@ -444,6 +447,15 @@ bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& e
                 error = L"invalid motion mode: " + value + L" (valid: amdof, fast)";
                 return false;
             }
+        } else if (opt == L"--sharpness" || opt == L"-sharpness") {
+            if (!need(value)) return false;
+            wchar_t* end = nullptr;
+            const float amount = wcstof(value.c_str(), &end);
+            if (!end || *end != L'\0' || !std::isfinite(amount) || amount < 0.0f || amount > 1.0f) {
+                error = L"invalid --sharpness: " + value + L" (valid range: 0.0 to 1.0)";
+                return false;
+            }
+            spec.sharpness = amount;
         } else if (opt == L"--trace" || opt == L"-trace") {
             if (!need(value)) return false;
             spec.tracePath = value;
