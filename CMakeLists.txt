@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.24)
 project(NRLive LANGUAGES CXX)
 include(CTest)
+include(FetchContent)
+
+# Use the public ReShade add-on API to render configured effects on NRLive's
+# pre-upscale color target instead of letting ReShade process the final output.
+FetchContent_Declare(reshade_api
+  GIT_REPOSITORY https://github.com/crosire/reshade.git
+  GIT_TAG 7bf9de8b33bcc76c3177007e65d73c72dd0f34c0
+)
+FetchContent_GetProperties(reshade_api)
+if(NOT reshade_api_POPULATED)
+  FetchContent_Populate(reshade_api)
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -56,6 +68,22 @@ add_executable(NRLive WIN32
   src/frametrace.cpp
   src/frame_limiter.cpp
 )
+
+
+# ReShade add-on that applies the user's normal ReShade effects to the
+# explicitly named pre-FSR target, and suppresses the ordinary present-time pass.
+add_library(NRLivePreFsrAddon MODULE src/reshade_pre_fsr_addon.cpp)
+target_include_directories(NRLivePreFsrAddon PRIVATE "${reshade_api_SOURCE_DIR}/include")
+target_compile_definitions(NRLivePreFsrAddon PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(NRLivePreFsrAddon PRIVATE d3d12 dxgi)
+set_target_properties(NRLivePreFsrAddon PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "NRLive-PreFSR"
+  SUFFIX ".addon64"
+  RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:NRLive>"
+  LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:NRLive>"
+)
+add_dependencies(NRLive NRLivePreFsrAddon)
 
 target_include_directories(NRLive PRIVATE
   "${FFX_INCLUDE_API}"
