@@ -7,6 +7,7 @@
 #include "overlay.h"
 #include "target.h"
 #include "frametrace.h"
+#include "frame_limiter.h"
 #include "frame_timing.h"
 #include <windows.h>
 #include <shellapi.h>
@@ -223,6 +224,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     setOverlayOpen(false);
     setStatus(out, label.c_str());
 
+    FrameLimiter frameLimiter;
     bool reset = true, running = true;
     bool stopLatched = false;
     float fps = 0;
@@ -247,6 +249,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
+      overlayConsumeFrameLimitToggle();
+      const auto limitCfg = overlayFrameLimitConfig();
+      frameLimiter.configure(limitCfg.enabled, limitCfg.fps, limitCfg.method);
       if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
       drawCursor();
 
@@ -274,6 +279,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (!stopLatched) { running = false; break; }
         stopLatched = true;
       } else stopLatched = false;
+
+      if (frameLimiter.enabled() && frameLimiter.method() == 0)
+        frameLimiter.wait(); // early mode: pace before capture/CPU preparation
 
       ComPtr<ID3D12Resource> color;
       Size cs{};
@@ -468,6 +476,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
 
       gfx.end();
+      if (frameLimiter.enabled() && frameLimiter.method() == 1)
+        frameLimiter.wait(); // late mode: finish CPU command recording before pacing
       gfx.present();
       QueryPerformanceCounter(&renderEnd);
       const double acquireMs = (acquireEnd.QuadPart - acquireStart.QuadPart) * 1000.0 / double(freq.QuadPart);

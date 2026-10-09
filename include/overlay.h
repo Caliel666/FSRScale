@@ -20,6 +20,13 @@ struct OverlayHudConfig {
   COLORREF frametime_color = RGB(0,255,0);  // #00FF00 green
 };
 
+// Frame pacing settings persisted in scaleconfig.ini.
+struct OverlayFrameLimitConfig {
+  bool enabled = false;
+  int fps = 60;
+  int method = 0; // 0=early/smooth, 1=late/snappy
+};
+
 // ── Overlay API ───────────────────────────────────────────────────────────
 // The overlay has two parts:
 //   1. Top bar (buttons: FSR / FPS / Camera / Settings) — only visible when
@@ -35,5 +42,7 @@ void overlayUpdate(float fps, float frametimeMs, Size capture, Size output);
 void overlaySetFsrEnabled(bool enabled);
 bool overlayConsumeFsrToggle();             // returns true once when FSR button clicked
 bool overlayConsumeScreenshot();            // returns true once when Camera button clicked
+bool overlayConsumeFrameLimitToggle();       // returns true once when the CAP button is clicked
+OverlayFrameLimitConfig overlayFrameLimitConfig();
 const OverlayHudConfig& overlayConfig();
 std::wstring overlayScreenshotPath();

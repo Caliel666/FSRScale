@@ -132,6 +132,7 @@ add_executable(NRLive WIN32
   src/overlay.cpp
   src/target.cpp
   src/frametrace.cpp
+  src/frame_limiter.cpp
 )
 
 target_include_directories(NRLive PRIVATE
@@ -163,6 +164,10 @@ if(BUILD_TESTING)
   add_executable(frame_timing_test tests/frame_timing_test.cpp)
   target_include_directories(frame_timing_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
   add_test(NAME capture_frame_timing_invariants COMMAND frame_timing_test)
+
+  add_executable(frame_limiter_test tests/frame_limiter_test.cpp)
+  target_include_directories(frame_limiter_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
+  add_test(NAME frame_limiter_invariants COMMAND frame_limiter_test)
 
 
   add_executable(fastmv_shader_test
