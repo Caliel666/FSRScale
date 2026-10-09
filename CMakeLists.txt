@@ -46,6 +46,7 @@ add_executable(NRLive WIN32
   src/main.cpp
   src/graphics.cpp
   src/capture.cpp
+  src/reshade_detect.cpp
   src/fsr.cpp
   src/amdof.cpp
   src/fastmv.cpp
