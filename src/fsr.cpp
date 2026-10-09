@@ -360,7 +360,11 @@ bool FsrFrameGeneration::resize(Size maxRender, Size display)
   backend.device = m_device;
   ffxCreateContextDescFrameGeneration fg{};
   fg.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
-  fg.header.pNext = &backend.header;
+  ffxCreateContextDescFrameGenerationVersion fgVersion{};
+  fgVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION;
+  fgVersion.version = FFX_FRAMEGENERATION_VERSION;
+  fgVersion.header.pNext = &backend.header;
+  fg.header.pNext = &fgVersion.header;
   fg.flags = FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED |
              FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE;
   fg.displaySize = { display.w, display.h };
@@ -459,6 +463,10 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
     prep.cameraFar = 1000.0f;
     prep.cameraFovAngleVertical = 1.0f;
     prep.viewSpaceToMetersFactor = 1.0f;
+    prep.cameraPosition[0] = prep.cameraPosition[1] = prep.cameraPosition[2] = 0.0f;
+    prep.cameraUp[0] = 0.0f; prep.cameraUp[1] = 1.0f; prep.cameraUp[2] = 0.0f;
+    prep.cameraRight[0] = 1.0f; prep.cameraRight[1] = 0.0f; prep.cameraRight[2] = 0.0f;
+    prep.cameraForward[0] = 0.0f; prep.cameraForward[1] = 0.0f; prep.cameraForward[2] = 1.0f;
     prep.depth = apiRes(depth, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
     prep.motionVectors = apiRes(motionVectors, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
     rc = g_ffx.Dispatch(&m_ctx, &prep.header);
