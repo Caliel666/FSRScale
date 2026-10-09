@@ -226,6 +226,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     FrameLimiter frameLimiter;
     bool reset = true, running = true;
+    bool lastFgEnabled = overlayFgEnabled();
     bool stopLatched = false;
     float fps = 0;
     Size lastCs{};
@@ -250,6 +251,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
       overlayConsumeFrameLimitToggle();
+      if (overlayConsumeFgToggle()) gfx.invalidateFrameHistory();
+      const bool frameGenerationEnabled = overlayFgEnabled();
+      if (frameGenerationEnabled != lastFgEnabled) { gfx.invalidateFrameHistory(); lastFgEnabled = frameGenerationEnabled; }
       const auto limitCfg = overlayFrameLimitConfig();
       frameLimiter.configure(limitCfg.enabled, limitCfg.fps, limitCfg.method);
       if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
@@ -444,6 +448,39 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         cmd->ResourceBarrier(n, b);
       }
 
+      bool generatedFramePresented = false;
+      if (frameGenerationEnabled && gfx.hasFrameHistory()) {
+        // Initial real-time prototype: synthesize a midpoint by blending the
+        // previous post-effect presentation image with the current post-effect
+        // source entirely on the GPU. This is deliberately labeled a temporal
+        // blend prototype, not AMD FSR Frame Generation; motion-compensated
+        // interpolation will replace it once the FSR FG API/runtime is wired.
+        if (frameLimiter.enabled() && frameLimiter.method() == 1)
+          frameLimiter.wait();
+        const float midClear[4] = { 0, 0, 0, 1 };
+        cmd->ClearRenderTargetView(gfx.rtvHandle(), midClear, 0, nullptr);
+        gfx.blitInterpolatedToBackbuffer(presentSrc, 0.5f);
+        D3D12_RESOURCE_BARRIER toPresent{};
+        toPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        toPresent.Transition.pResource = back;
+        toPresent.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        toPresent.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        toPresent.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+        cmd->ResourceBarrier(1, &toPresent);
+        gfx.end();
+        gfx.present();
+        gfx.begin();
+        back = gfx.backbuffer();
+        D3D12_RESOURCE_BARRIER toRender{};
+        toRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        toRender.Transition.pResource = back;
+        toRender.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        toRender.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+        toRender.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        cmd->ResourceBarrier(1, &toRender);
+        generatedFramePresented = true;
+      }
+
       const float clear[4] = { 0, 0, 0, 1 };
       cmd->ClearRenderTargetView(gfx.rtvHandle(), clear, 0, nullptr);
       gfx.blitToBackbuffer(presentSrc);
@@ -452,6 +489,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       // stretch blit. The overlay is a separate window, so it is excluded.
       if (screenshotRequested)
         gfx.captureBackbufferScreenshot(overlayScreenshotPath(), cap.totalFrames());
+      gfx.copyBackbufferToHistory();
 
       // ---- Batch D: post-blit backbuffer + colour restore -----------------
       //   back:  RTV -> PRESENT  (always)
@@ -476,7 +514,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
 
       gfx.end();
-      if (frameLimiter.enabled() && frameLimiter.method() == 1)
+      if (frameLimiter.enabled() && frameLimiter.method() == 1 && !generatedFramePresented)
         frameLimiter.wait(); // late mode: finish CPU command recording before pacing
       gfx.present();
       QueryPerformanceCounter(&renderEnd);
