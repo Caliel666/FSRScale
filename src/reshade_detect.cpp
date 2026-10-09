@@ -1,10 +1,10 @@
 #include "reshade_detect.h"
 #include <tlhelp32.h>
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -25,16 +25,17 @@ template <typename NtHeaders>
 bool hasReShadeExportsForHeaders(const std::vector<uint8_t>& bytes, size_t ntOffset)
 {
   NtHeaders nt{};
-  if (!readObject(bytes, ntOffset, nt)) return false;
-  if (nt.Signature != IMAGE_NT_SIGNATURE) return false;
+  if (!readObject(bytes, ntOffset, nt) || nt.Signature != IMAGE_NT_SIGNATURE) return false;
 
-  const size_t optionalOffset = ntOffset + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER);
-  if (nt.FileHeader.SizeOfOptionalHeader < sizeof(typename std::conditional<
-          std::is_same<NtHeaders, IMAGE_NT_HEADERS64>::value,
-          IMAGE_OPTIONAL_HEADER64, IMAGE_OPTIONAL_HEADER32>::type)) return false;
+  using OptionalHeader = typename std::conditional<
+      std::is_same<NtHeaders, IMAGE_NT_HEADERS64>::value,
+      IMAGE_OPTIONAL_HEADER64, IMAGE_OPTIONAL_HEADER32>::type;
+  if (nt.FileHeader.SizeOfOptionalHeader < sizeof(OptionalHeader)) return false;
 
-  const size_t sectionOffset = optionalOffset + nt.FileHeader.SizeOfOptionalHeader;
-  const size_t sectionBytes = static_cast<size_t>(nt.FileHeader.NumberOfSections) * sizeof(IMAGE_SECTION_HEADER);
+  const size_t sectionOffset = ntOffset + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) +
+                               nt.FileHeader.SizeOfOptionalHeader;
+  const size_t sectionBytes = static_cast<size_t>(nt.FileHeader.NumberOfSections) *
+                              sizeof(IMAGE_SECTION_HEADER);
   if (!rangeFits(sectionOffset, sectionBytes, bytes.size())) return false;
 
   const auto& optional = nt.OptionalHeader;
@@ -66,8 +67,8 @@ bool hasReShadeExportsForHeaders(const std::vector<uint8_t>& bytes, size_t ntOff
   if (exportOffset == std::numeric_limits<size_t>::max()) return false;
 
   IMAGE_EXPORT_DIRECTORY directory{};
-  if (!readObject(bytes, exportOffset, directory)) return false;
-  if (directory.NumberOfNames == 0 || directory.NumberOfNames > 65536) return false;
+  if (!readObject(bytes, exportOffset, directory) ||
+      directory.NumberOfNames == 0 || directory.NumberOfNames > 65536) return false;
 
   const size_t namesBytes = static_cast<size_t>(directory.NumberOfNames) * sizeof(DWORD);
   const size_t namesOffset = rvaToOffset(directory.AddressOfNames, namesBytes);
@@ -82,11 +83,11 @@ bool hasReShadeExportsForHeaders(const std::vector<uint8_t>& bytes, size_t ntOff
     const size_t nameOffset = rvaToOffset(nameRva, 1);
     if (nameOffset == std::numeric_limits<size_t>::max()) continue;
 
-    // Export names are NUL-terminated strings within the mapped section.
     size_t end = nameOffset;
     while (end < bytes.size() && end - nameOffset <= 256 && bytes[end] != 0) ++end;
     if (end == bytes.size() || end - nameOffset > 256) continue;
-    const std::string name(reinterpret_cast<const char*>(bytes.data() + nameOffset), end - nameOffset);
+    const std::string name(reinterpret_cast<const char*>(bytes.data() + nameOffset),
+                           end - nameOffset);
     if (name == "ReShadeRegisterAddon") hasRegister = true;
     if (name == "ReShadeUnregisterAddon") hasUnregister = true;
     if (hasRegister && hasUnregister) return true;
@@ -96,9 +97,8 @@ bool hasReShadeExportsForHeaders(const std::vector<uint8_t>& bytes, size_t ntOff
 
 bool hasReShadeExports(const std::wstring& path)
 {
-  // Read the PE file as data. Do not LoadLibraryEx the target's modules into
-  // NRLive: even DONT_RESOLVE_DLL_REFERENCES maps an arbitrary graphics DLL
-  // into this process and can interfere with proxy DLLs / DXGI initialization.
+  // Parse the file as data. Even DONT_RESOLVE_DLL_REFERENCES maps arbitrary
+  // game/graphics DLLs into NRLive and can interfere with proxy DLL handling.
   std::ifstream file(path, std::ios::binary | std::ios::ate);
   if (!file) return false;
   const std::streamoff length = file.tellg();
@@ -116,12 +116,9 @@ bool hasReShadeExports(const std::wstring& path)
   DWORD signature = 0;
   if (!readObject(bytes, ntOffset, signature) || signature != IMAGE_NT_SIGNATURE) return false;
 
-  IMAGE_FILE_HEADER fileHeader{};
-  if (!readObject(bytes, ntOffset + sizeof(DWORD), fileHeader)) return false;
   WORD magic = 0;
   if (!readObject(bytes, ntOffset + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), magic))
     return false;
-
   if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
     return hasReShadeExportsForHeaders<IMAGE_NT_HEADERS64>(bytes, ntOffset);
   if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
