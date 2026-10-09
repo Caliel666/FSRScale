@@ -158,17 +158,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     return 2;
   }
 
-  // ReShade is special-cased by detecting its public addon exports in the
-  // selected game's process (not by DLL name). Keep the normal OptiScaler /
-  // FSR integration untouched; this flag documents which input path is active.
-  DWORD targetPid = 0;
-  GetWindowThreadProcessId(target, &targetPid);
-  const ReShadeDetection reshade = detectReShadeInProcess(targetPid);
-  if (reshade.hooked) {
-    logMain(L"ReShade detected in target process: " + reshade.modulePath);
-    logMain(L"ReShade-specific path: captured game image is the pre-FSR input; do not apply ReShade to generated output frames.");
+  // Select ReShade mode from files beside NRLive.exe, as requested. ReShade
+  // may be injected into NRLiveUI.exe rather than the selected game process,
+  // so process-module detection is not a reliable pipeline selector.
+  const ReShadeDetection reshade = detectReShadeMode();
+  if (reshade.enabled) {
+    logMain(L"ReShade mode enabled by local marker: " + reshade.markerPath);
   } else {
-    logMain(L"ReShade not detected in target process; using existing FSR/FG path.");
+    logMain(L"No local ReShade.ini or amd-nr.addon64 marker; using existing FSR/FG path.");
   }
 
   HWND out = createOutput(inst, 1280, 720);
