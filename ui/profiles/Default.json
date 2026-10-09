@@ -4,7 +4,6 @@
   "delay": 5,
   "no_overlay": false,
   "motion": "fast",
-  "sharpness": 0.65,
   "scale_hotkey": "ctrl+alt+s",
   "stop_key": "ctrl+shift+a",
   "overlay_key": "ctrl+home",
