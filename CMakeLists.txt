@@ -26,20 +26,19 @@ foreach(_include "${FFX_INCLUDE_API}" "${FFX_INCLUDE_FG}" "${FFX_INCLUDE_UPSCALE
   endif()
 endforeach()
 
-set(_FFX_REQUIRED_DLLS
-  amd_fidelityfx_loader_dx12.dll
-  amd_fidelityfx_framegeneration_dx12.dll
-  amd_fidelityfx_upscaler_dx12.dll
-)
-foreach(_dll IN LISTS _FFX_REQUIRED_DLLS)
-  find_file(FFX_DLL_${_dll} NAMES "${_dll}"
-    PATHS "${FFX_BIN}" "${FFX_SDK}/PrebuiltSignedDLL"
-          "${FFX_SDK}/Kits/FidelityFX/bin" "${FFX_SDK}/bin"
-    NO_DEFAULT_PATH)
-  if(NOT FFX_DLL_${_dll})
-    message(FATAL_ERROR "Required FSR SDK 2.3.0 runtime not found: ${_dll}. Set -DFFX_BIN= to the folder containing the signed DX12 DLLs.")
+set(_FFX_DLL_SEARCH_PATHS "${FFX_BIN}" "${FFX_SDK}/PrebuiltSignedDLL"
+    "${FFX_SDK}/Kits/FidelityFX/bin" "${FFX_SDK}/bin")
+find_file(FFX_DLL_LOADER NAMES amd_fidelityfx_loader_dx12.dll
+  PATHS ${_FFX_DLL_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_file(FFX_DLL_FRAMEGEN NAMES amd_fidelityfx_framegeneration_dx12.dll
+  PATHS ${_FFX_DLL_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_file(FFX_DLL_UPSCALER NAMES amd_fidelityfx_upscaler_dx12.dll
+  PATHS ${_FFX_DLL_SEARCH_PATHS} NO_DEFAULT_PATH)
+foreach(_required_var FFX_DLL_LOADER FFX_DLL_FRAMEGEN FFX_DLL_UPSCALER)
+  if(NOT ${_required_var})
+    message(FATAL_ERROR "Required FSR SDK 2.3.0 runtime missing: ${_required_var}. Set -DFFX_BIN= to the folder containing the signed DX12 DLLs.")
   endif()
-  message(STATUS "FSR runtime ${_dll}: ${FFX_DLL_${_dll}}")
+  message(STATUS "FSR runtime ${_required_var}: ${${_required_var}}")
 endforeach()
 
 # ---------------------------------------------------------------------------
@@ -76,10 +75,10 @@ set_target_properties(NRLive PROPERTIES
   VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:NRLive>"
 )
 
-foreach(_dll IN LISTS _FFX_REQUIRED_DLLS)
+foreach(_dll_path "${FFX_DLL_LOADER}" "${FFX_DLL_FRAMEGEN}" "${FFX_DLL_UPSCALER}")
   add_custom_command(TARGET NRLive POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${FFX_DLL_${_dll}}"
+      "${_dll_path}"
       "$<TARGET_FILE_DIR:NRLive>"
   )
 endforeach()
