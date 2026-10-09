@@ -17,8 +17,6 @@ struct TargetSpec {
   enum class MotionMode { AmdOf, Fast };
   MotionMode motionMode = MotionMode::Fast;
   std::wstring motionModeText = L"fast";
-  // Native FSR upscaler sharpening, normalized to the SDK's 0..1 range.
-  float sharpness = 0.65f;
   // Optional CSV trace for comparing capture, render CPU, and present cadence.
   std::wstring tracePath;
   UINT stopHotkeyModifiers = MOD_CONTROL | MOD_SHIFT;
