@@ -38,6 +38,7 @@ public partial class MainWindow : Window
         public string scale_hotkey { get; set; } = "ctrl+alt+s";
         public string stop_key { get; set; } = "ctrl+shift+a";
         public string overlay_key { get; set; } = "ctrl+home";
+        public string bind_bypass { get; set; } = "home,insert,end,pageup,pagedown";
         public string exe_path { get; set; } = "";
     }
 
@@ -51,6 +52,7 @@ public partial class MainWindow : Window
         TargetTextBox.TextChanged += (_, _) => UpdatePreview();
         StopHotkeyBox.TextChanged += (_, _) => UpdatePreview();
         OverlayHotkeyBox.TextChanged += (_, _) => UpdatePreview();
+        BindBypassBox.TextChanged += (_, _) => UpdatePreview();
         ScaleHotkeyBox.TextChanged += (_, _) => UpdatePreview();
         ExePathBox.TextChanged += (_, _) => UpdatePreview();
         HudCheckBox.Checked += (_, _) => UpdatePreview();
@@ -116,6 +118,7 @@ public partial class MainWindow : Window
             ScaleHotkeyBox.Text = p.scale_hotkey;
             StopHotkeyBox.Text = p.stop_key;
             OverlayHotkeyBox.Text = p.overlay_key;
+            BindBypassBox.Text = string.IsNullOrWhiteSpace(p.bind_bypass) ? "home,insert,end,pageup,pagedown" : p.bind_bypass;
             if (!string.IsNullOrWhiteSpace(p.exe_path)) ExePathBox.Text = p.exe_path;
             ProfileTitle.Text = name == "Default" ? "Scaling setup" : name;
             SidebarHotkey.Text = p.scale_hotkey.Replace("+", " + ").ToUpperInvariant();
@@ -135,6 +138,7 @@ public partial class MainWindow : Window
         scale_hotkey = ScaleHotkeyBox.Text.Trim(),
         stop_key = StopHotkeyBox.Text.Trim(),
         overlay_key = OverlayHotkeyBox.Text.Trim(),
+        bind_bypass = BindBypassBox.Text.Trim(),
         exe_path = ExePathBox.Text.Trim()
     };
 
@@ -210,7 +214,7 @@ public partial class MainWindow : Window
         vk = key.ToLowerInvariant() switch
         {
             "home" => 0x24, "end" => 0x23, "insert" => 0x2D, "delete" or "del" => 0x2E,
-            "space" => 0x20, "tab" => 0x09, "enter" => 0x0D, "esc" or "escape" => 0x1B,
+            "space" or "spacebar" => 0x20, "tab" => 0x09, "enter" or "return" => 0x0D, "esc" or "escape" => 0x1B,
             "pageup" => 0x21, "pagedown" => 0x22, "up" => 0x26, "down" => 0x28, "left" => 0x25, "right" => 0x27,
             _ => 0
         };
@@ -228,6 +232,16 @@ public partial class MainWindow : Window
     }
 
     private void ScaleButton_Click(object sender, RoutedEventArgs e) => ToggleScaling();
+
+    private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void Maximize_Click(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        MaximizeButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+    }
+
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     private void ToggleScaling()
     {
@@ -259,7 +273,13 @@ public partial class MainWindow : Window
         if ((p.target_mode == "pname" || p.target_mode == "window") && string.IsNullOrWhiteSpace(p.target_text)) { MessageBox.Show(this, "Enter a process name or window-title regex.", "Target", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
         if (!TryParseHotkey(p.scale_hotkey, out _, out _) || !TryParseHotkey(p.stop_key, out _, out _) || !TryParseHotkey(p.overlay_key, out _, out _))
         {
-            MessageBox.Show(this, "The NRLive stop and overlay hotkeys must be valid combinations.", "Hotkey", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "The Scale / Unscale, Force stop, and Overlay hotkeys must be valid combinations.", "Hotkey", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        var bypassKeys = p.bind_bypass.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (bypassKeys.Length == 0 || bypassKeys.Any(key => !TryParseHotkey(key, out _, out _)))
+        {
+            MessageBox.Show(this, "Enter one or more valid passthrough keys separated by commas. Examples: home,insert,space or ctrl+space.", "Passthrough keys", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -273,6 +293,7 @@ public partial class MainWindow : Window
         start.ArgumentList.Add("--mv"); start.ArgumentList.Add(p.motion);
         start.ArgumentList.Add("--key"); start.ArgumentList.Add(p.stop_key);
         start.ArgumentList.Add("--overlaykey"); start.ArgumentList.Add(p.overlay_key);
+        start.ArgumentList.Add("--bindbypass"); start.ArgumentList.Add(p.bind_bypass);
 
         try
         {
@@ -329,7 +350,7 @@ public partial class MainWindow : Window
         if (CommandPreview == null || _loadingProfile) return;
         var p = ReadProfile();
         string target = p.target_mode switch { "front" => "-front", "pid" => $"-pid {p.target_text}", "pname" => $"-pname \"{p.target_text}\"", "window" => $"-window \"{p.target_text}\"", _ => $"-picker {p.delay}" };
-        CommandPreview.Text = $"{p.exe_path} {target} --mv {p.motion} --key {p.stop_key} --overlaykey {p.overlay_key}";
+        CommandPreview.Text = $"{p.exe_path} {target} --mv {p.motion} --key {p.stop_key} --overlaykey {p.overlay_key} --bindbypass {p.bind_bypass}";
     }
 
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
