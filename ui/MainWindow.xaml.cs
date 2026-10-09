@@ -67,6 +67,7 @@ public partial class MainWindow : Window
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
         Directory.CreateDirectory(ProfilesDir);
+        ExePathBox.Text = Path.Combine(Root, "NRLive.exe");
         if (!File.Exists(ProfilePath("Default")))
             File.WriteAllText(ProfilePath("Default"), JsonSerializer.Serialize(new Profile(), new JsonSerializerOptions { WriteIndented = true }));
         var names = Directory.GetFiles(ProfilesDir, "*.json").Select(Path.GetFileNameWithoutExtension).Where(x => x != null).OrderBy(x => x).ToList();
@@ -300,7 +301,6 @@ public partial class MainWindow : Window
         if (_secondsLeft > 0) ScaleButton.Content = $"Starting · {_secondsLeft}";
         else
         {
-            _timer.Stop();
             ScaleButton.Content = "Unscale  ■";
             ScaleButton.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(194, 73, 91));
             StatusText.Text = "Scaling session is running. Press Unscale or the toggle hotkey to stop NRLive.";
