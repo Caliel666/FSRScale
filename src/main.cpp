@@ -334,8 +334,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         overlaySetFgEnabled(fgEnabled);
         reset = true;
       }
-      drawCursor();
-
       // Camera requests are consumed only once a fresh capture frame is
       // available, then executed after the final FSR/blit pass below.
       bool screenshotRequested = false;
@@ -410,6 +408,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         QueryPerformanceCounter(&lastCaptured);
         continue; // let WGC deliver a fresh frame before rendering
       }
+
+      // Only transform/hide the system cursor while the scaled presentation
+      // is active. Calling drawCursor before focus-state handling re-applied
+      // ClipCursor and hid the real cursor on every soft-unscale polling loop,
+      // immediately undoing releaseCursorClip() and trapping the user in NRLive.
+      drawCursor();
 
       if (frameLimiter.enabled() && frameLimiter.method() == 0)
         frameLimiter.wait(); // early mode: pace before capture/CPU preparation
