@@ -262,6 +262,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       pollOverlayToggle(spec);
       pollBindBypass(out, spec);
       overlayConsumeFrameLimitToggle();
+      // The FG toggle is deliberately UI-only in this research branch.
+      // Consume its edge so it cannot be mistaken for a pending runtime action.
+      overlayConsumeFgToggle();
       const auto limitCfg = overlayFrameLimitConfig();
       frameLimiter.configure(limitCfg.enabled, limitCfg.fps, limitCfg.method);
       if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
