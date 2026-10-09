@@ -6,6 +6,8 @@
 #include "ui.h"
 #include "overlay.h"
 #include "target.h"
+#include "frametrace.h"
+#include "frame_timing.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
@@ -98,6 +100,11 @@ static bool stopHotkeyDown(UINT modifiers, UINT vk)
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 {
+  // Keep HWND, WGC crop, and cursor coordinates in the same physical-pixel
+  // space. DPI virtualization could make the cursor miss the source bounds,
+  // disabling both clipping and the source-to-presentation coordinate map.
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   TargetSpec spec;
@@ -164,6 +171,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
   setCaptureTarget(target);
   setScaleSizes(render, display);
 
+  FrameTrace trace;
+  if (!spec.tracePath.empty() && !trace.open(spec.tracePath)) {
+    const std::wstring msg = L"Could not open frame trace CSV: " + spec.tracePath;
+    if (cliMode && hasConsole()) printCli(msg);
+    else MessageBoxW(nullptr, msg.c_str(), L"NRLive", MB_ICONWARNING);
+  }
+
   try {
     Graphics gfx;
     if (!gfx.init(out, render, display)) throw 1;
@@ -213,11 +227,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     bool stopLatched = false;
     float fps = 0;
     Size lastCs{};
-    LARGE_INTEGER freq, last, now;
+    LARGE_INTEGER freq, lastCaptured, now;
     QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&last);
+    QueryPerformanceCounter(&lastCaptured);
 
     ShowWindow(out, SW_SHOWNOACTIVATE);
+    QueryPerformanceCounter(&lastCaptured); // exclude initialization from the first captured-frame interval
     /* HUD starts hidden; Ctrl+Home (or --overlaykey) toggles it */
 
     while (running) {
@@ -243,15 +258,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       // current-top).  Both the FPS overlay and the FSR dt use this value.
       // The previous code had a second QPC after cap.acquire which measured
       // only the render portion, making the displayed FPS incorrect.
-      {
-        QueryPerformanceCounter(&now);
-        float ms = (float)((now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart));
-        last = now;
-        float f = (ms > 0.001f) ? (1000.0f / ms) : 0.0f;
-        fps = f;
-        Size csForOverlay = lastCs.w ? lastCs : render;
-        overlayUpdate(f, ms, csForOverlay, display);
-      }
+      // Frame time is measured between successfully acquired capture frames, not
+      // between busy-poll iterations. Using poll cadence here made FSR receive
+      // an unrealistically tiny dt and made the FPS HUD report the polling rate.
+      float loopMs = 0.0f;
 
       // If the target (game) window is gone, quit.  This happens when the
       // game exits — NRLive should not keep running with a dead target.
@@ -268,6 +278,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       ComPtr<ID3D12Resource> color;
       Size cs{};
       uint64_t fenceVal = 0;
+      LARGE_INTEGER acquireStart{}, acquireEnd{}, renderStart{}, renderEnd{};
+      QueryPerformanceCounter(&acquireStart);
       if (!cap.acquire(color, cs, fenceVal)) {
         // No new WGC frame yet — do not re-submit with stale resource states.
         // Sleep(1) on Windows can stall for 1-15ms and was a stutter source.
@@ -276,18 +288,26 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (!SwitchToThread()) SleepEx(0, TRUE);
         continue;
       }
+      QueryPerformanceCounter(&acquireEnd);
+      QueryPerformanceCounter(&now);
+      loopMs = (float)((now.QuadPart - lastCaptured.QuadPart) * 1000.0 / double(freq.QuadPart));
+      lastCaptured = now;
+      if (loopMs > 0.001f) fps = frame_timing::fpsFromFrameDeltaMs(loopMs);
+      Size csForOverlay = cs;
+      overlayUpdate(fps, loopMs, csForOverlay, display);
       if (cap.fence() && fenceVal)
         gfx.queue()->Wait(cap.fence(), fenceVal);
       lastCs = cs;
       setScaleSizes(cs, display);
       if (!gfx.ensureAuxTextures(cs)) throw std::runtime_error("auxiliary graphics textures could not be resized");
+      QueryPerformanceCounter(&renderStart);
 
       // Keep a Camera click pending until a frame is available. The actual
       // PNG is still generated from the post-FSR presentation surface below.
       screenshotRequested = overlayConsumeScreenshot();
 
       // dt for FSR — use the frame ms from the top-of-loop QPC (stored in fps)
-      float dt = std::clamp(1000.0f / (fps > 0.001f ? fps : 60.0f), 1.0f, 100.0f);
+      float dt = frame_timing::clampFrameDeltaMs(fps > 0.001f ? 1000.0f / fps : (1000.0f / 60.0f));
 
       gfx.begin();
       auto* cmd = gfx.cmd();
@@ -449,6 +469,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       gfx.end();
       gfx.present();
+      QueryPerformanceCounter(&renderEnd);
+      const double acquireMs = (acquireEnd.QuadPart - acquireStart.QuadPart) * 1000.0 / double(freq.QuadPart);
+      const double renderCpuMs = (renderEnd.QuadPart - renderStart.QuadPart) * 1000.0 / double(freq.QuadPart);
+      trace.record(cap.totalFrames(), loopMs, acquireMs, renderCpuMs, cs, display, spec.motionModeText, usedFsr);
 
       HudInfo hi;
       hi.fps = fps;

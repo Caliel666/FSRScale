@@ -64,7 +64,21 @@ static void clipCursorToOutput(bool enable)
   ClientToScreen(h, &tl);
   ClientToScreen(h, &br);
   RECT screen{ tl.x, tl.y, br.x, br.y };
-  ClipCursor(&screen);
+  if (!ClipCursor(&screen)) return;
+
+  // Some games repeatedly clear the global ClipCursor rectangle. Reasserting
+  // it each render-loop iteration is normally enough; if the pointer already
+  // escaped between those calls, clamp it back into the valid client pixels.
+  // This also avoids a one-frame cursor jump when focus changes.
+  POINT cursor{};
+  if (GetCursorPos(&cursor)) {
+    const LONG maxX = std::max(screen.left, screen.right - 1);
+    const LONG maxY = std::max(screen.top, screen.bottom - 1);
+    const LONG x = std::clamp(cursor.x, screen.left, maxX);
+    const LONG y = std::clamp(cursor.y, screen.top, maxY);
+    if (x != cursor.x || y != cursor.y)
+      SetCursorPos(x, y);
+  }
 }
 
 // Clip cursor to the TARGET (game) window's CLIENT-AREA screen rect.
@@ -331,11 +345,15 @@ void drawCursor()
       const int dw = out.right - out.left;
       const int dh = out.bottom - out.top;
 
-      if (sw > 1 && sh > 1 &&
-          ci.ptScreenPos.x >= srcTopLeft.x && ci.ptScreenPos.x < srcBottomRight.x &&
-          ci.ptScreenPos.y >= srcTopLeft.y && ci.ptScreenPos.y < srcBottomRight.y) {
-        const double nx = double(ci.ptScreenPos.x - srcTopLeft.x) / double(sw - 1);
-        const double ny = double(ci.ptScreenPos.y - srcTopLeft.y) / double(sh - 1);
+      if (sw > 1 && sh > 1 && dw > 1 && dh > 1) {
+        // Clamp instead of skipping the transform when Win32 reports a
+        // cursor just outside the client rectangle (often during focus/DPI
+        // transitions). Skipping it made the cursor jump to raw desktop
+        // coordinates and appear offset from the upscaled game.
+        const LONG sourceX = std::clamp(ci.ptScreenPos.x, srcTopLeft.x, srcBottomRight.x - 1);
+        const LONG sourceY = std::clamp(ci.ptScreenPos.y, srcTopLeft.y, srcBottomRight.y - 1);
+        const double nx = double(sourceX - srcTopLeft.x) / double(sw - 1);
+        const double ny = double(sourceY - srcTopLeft.y) / double(sh - 1);
         visualPos.x = out.left + (LONG)std::lround(nx * double(dw - 1));
         visualPos.y = out.top  + (LONG)std::lround(ny * double(dh - 1));
       }

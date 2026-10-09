@@ -131,6 +131,7 @@ add_executable(NRLive WIN32
   src/ui.cpp
   src/overlay.cpp
   src/target.cpp
+  src/frametrace.cpp
 )
 
 target_include_directories(NRLive PRIVATE
@@ -159,6 +160,11 @@ if(_FFX_DLL)
 endif()
 
 if(BUILD_TESTING)
+  add_executable(frame_timing_test tests/frame_timing_test.cpp)
+  target_include_directories(frame_timing_test PRIVATE "${CMAKE_SOURCE_DIR}/include")
+  add_test(NAME capture_frame_timing_invariants COMMAND frame_timing_test)
+
+
   add_executable(fastmv_shader_test
     tests/fastmv_shader_test.cpp
     src/fastmv.cpp

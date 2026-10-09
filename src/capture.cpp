@@ -84,7 +84,19 @@ bool Capture::init(ID3D12Device* d12, ID3D12CommandQueue* q)
     m_error = L"Fence share failed"; return false;
   }
   if (m_d11_5) {
+    // Some drivers expose ID3D11Device5 but reject opening a D3D12-created
+    // shared fence. Do not silently fall back to an unsynchronised D3D12
+    // queue signal: that can present the freshly-created (black) texture
+    // before the D3D11 copy has completed.
     m_d11_5->OpenSharedFence(m_fenceHandle, IID_PPV_ARGS(&m_fence11));
+  }
+  D3D11_QUERY_DESC queryDesc{};
+  queryDesc.Query = D3D11_QUERY_EVENT;
+  if (FAILED(m_d11->CreateQuery(&queryDesc, &m_copyCompleteQuery))) {
+    if (!m_fence11) {
+      m_error = L"Neither shared D3D11 fence nor event-query synchronization is available";
+      return false;
+    }
   }
   return true;
 }
@@ -309,18 +321,38 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
   m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0,
                                src.Get(), 0, &srcBox);
 
-  // Publish to D3D12 via shared fence. Prefer ID3D11Fence::Signal (no Flush).
-  // Flush() every frame was a major source of stutter (full GPU pipeline drain).
+  // Publish the copy to D3D12. A shared D3D11 fence is the fast path.
+  // The old fallback only called Flush() and then signalled the fence from
+  // the D3D12 queue; Flush submits work but does NOT wait for its completion,
+  // so D3D12 could read the still-black shared texture. Use a D3D11 event
+  // query in that case and only release the D3D12 queue after the copy ends.
   const uint64_t fv = ++m_fenceValue;
+  bool d3d11FenceSignalled = false;
   if (m_fence11) {
     ComPtr<ID3D11DeviceContext4> ctx4;
-    if (SUCCEEDED(m_ctx.As(&ctx4))) {
-      ctx4->Signal(m_fence11.Get(), fv);
-    } else {
-      m_ctx->Flush(); // only if we cannot Signal
+    if (SUCCEEDED(m_ctx.As(&ctx4)) &&
+        SUCCEEDED(ctx4->Signal(m_fence11.Get(), fv))) {
+      d3d11FenceSignalled = true;
     }
-  } else {
+  }
+  if (!d3d11FenceSignalled) {
+    if (!m_copyCompleteQuery) {
+      m_error = L"Shared fence signal failed and no event-query fallback exists";
+      return false;
+    }
+    m_ctx->End(m_copyCompleteQuery.Get());
     m_ctx->Flush();
+    HRESULT queryResult = S_FALSE;
+    while (queryResult == S_FALSE) {
+      queryResult = m_ctx->GetData(m_copyCompleteQuery.Get(), nullptr, 0, 0);
+      if (queryResult == S_FALSE) SwitchToThread();
+    }
+    if (FAILED(queryResult)) {
+      m_error = L"D3D11 event-query synchronization failed";
+      return false;
+    }
+    // The D3D11 copy is now complete; this signal safely orders the caller's
+    // subsequent queue wait without racing the independent D3D11 queue.
     m_q->Signal(m_fence.Get(), fv);
   }
 
