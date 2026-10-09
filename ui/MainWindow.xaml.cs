@@ -35,7 +35,6 @@ public partial class MainWindow : Window
         public int delay { get; set; } = 5;
         public bool no_overlay { get; set; }
         public string motion { get; set; } = "fast";
-        public double sharpness { get; set; } = 0.65;
         public string scale_hotkey { get; set; } = "ctrl+alt+s";
         public string stop_key { get; set; } = "ctrl+shift+a";
         public string overlay_key { get; set; } = "ctrl+home";
@@ -114,7 +113,6 @@ public partial class MainWindow : Window
             DelayBox.Text = Math.Clamp(p.delay, 1, 30).ToString();
             HudCheckBox.IsChecked = !p.no_overlay;
             MotionBox.SelectedIndex = p.motion == "amdof" ? 1 : 0;
-            SharpnessSlider.Value = Math.Clamp(p.sharpness, 0, 1);
             ScaleHotkeyBox.Text = p.scale_hotkey;
             StopHotkeyBox.Text = p.stop_key;
             OverlayHotkeyBox.Text = p.overlay_key;
@@ -134,7 +132,6 @@ public partial class MainWindow : Window
         delay = int.TryParse(DelayBox.Text, out int delay) ? Math.Clamp(delay, 1, 30) : 5,
         no_overlay = HudCheckBox.IsChecked != true,
         motion = MotionBox.SelectedIndex == 1 ? "amdof" : "fast",
-        sharpness = Math.Round(SharpnessSlider.Value, 2),
         scale_hotkey = ScaleHotkeyBox.Text.Trim(),
         stop_key = StopHotkeyBox.Text.Trim(),
         overlay_key = OverlayHotkeyBox.Text.Trim(),
@@ -154,12 +151,6 @@ public partial class MainWindow : Window
     }
 
     private void SaveProfile_Click(object sender, RoutedEventArgs e) => SaveCurrentProfile(true);
-
-    private void SharpnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (SharpnessValue != null) SharpnessValue.Text = SharpnessSlider.Value.ToString("0.00");
-        UpdatePreview();
-    }
 
     private void BrowseExe_Click(object sender, RoutedEventArgs e)
     {
@@ -280,7 +271,6 @@ public partial class MainWindow : Window
         else if (p.target_mode == "window") { start.ArgumentList.Add("-window"); start.ArgumentList.Add(p.target_text); start.ArgumentList.Add("-delay"); start.ArgumentList.Add(p.delay.ToString()); }
         if (p.no_overlay) start.ArgumentList.Add("-nooverlay");
         start.ArgumentList.Add("--mv"); start.ArgumentList.Add(p.motion);
-        start.ArgumentList.Add("--sharpness"); start.ArgumentList.Add(p.sharpness.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
         start.ArgumentList.Add("--key"); start.ArgumentList.Add(p.stop_key);
         start.ArgumentList.Add("--overlaykey"); start.ArgumentList.Add(p.overlay_key);
 
@@ -339,7 +329,7 @@ public partial class MainWindow : Window
         if (CommandPreview == null || _loadingProfile) return;
         var p = ReadProfile();
         string target = p.target_mode switch { "front" => "-front", "pid" => $"-pid {p.target_text}", "pname" => $"-pname \"{p.target_text}\"", "window" => $"-window \"{p.target_text}\"", _ => $"-picker {p.delay}" };
-        CommandPreview.Text = $"{p.exe_path} {target} --mv {p.motion} --sharpness {p.sharpness:0.00} --key {p.stop_key} --overlaykey {p.overlay_key}";
+        CommandPreview.Text = $"{p.exe_path} {target} --mv {p.motion} --key {p.stop_key} --overlaykey {p.overlay_key}";
     }
 
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
