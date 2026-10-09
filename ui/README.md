@@ -1,10 +1,10 @@
 # NRLive Windows launcher
 
-The launcher is a native **WPF / .NET 8** desktop app styled for Windows 11. Its layout and workflow take inspiration from Lossless Scaling and Magpie without copying their assets.
+The launcher is a native **WPF / .NET 10** desktop app styled for Windows 11. Its layout and workflow take inspiration from Lossless Scaling and Magpie without copying their assets.
 
 ## Build
 
-On Windows with the .NET 8 SDK:
+On Windows with the .NET 10 SDK:
 
 ```powershell
 dotnet publish .\NRLiveUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\build
