@@ -108,7 +108,8 @@ bool FastMv::createPipeline()
         !compile(FastMvShaders::Down, "fastmv_down", m_downPso) ||
         !compile(FastMvShaders::Search, "fastmv_search", m_searchPso) ||
         !compile(FastMvShaders::Median, "fastmv_median", m_medianPso) ||
-        !compile(FastMvShaders::Pixel, "fastmv_pixel", m_pixelPso))
+        !compile(FastMvShaders::Pixel, "fastmv_pixel", m_pixelPso) ||
+        !compile(FastMvShaders::SmoothForFrameGeneration, "fastmv_fg_smooth", m_smoothPso))
         return false;
 
     D3D12_DESCRIPTOR_HEAP_DESC hd{};
@@ -149,6 +150,7 @@ bool FastMv::ensureResources(Size rs)
         for (auto& r : level) r.Reset();
     for (auto& r : m_grid) r.Reset();
     m_filtered.Reset();
+    m_fgSmoothed.Reset();
 
     m_render = rs;
     m_hasHistory = false;
@@ -211,6 +213,8 @@ bool FastMv::ensureResources(Size rs)
             return false;
 
     if (!make(m_filtered, m_gw[1], m_gh[1], DXGI_FORMAT_R16G16_FLOAT))
+        return false;
+    if (!make(m_fgSmoothed, rs.w, rs.h, DXGI_FORMAT_R16G16_FLOAT))
         return false;
 
     return true;
@@ -285,7 +289,8 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
                       ID3D12Resource* fullResMv,
                       ID3D12Resource* reactive,
                       Size renderSize,
-                      bool reset)
+                      bool reset,
+                      bool smoothForFrameGeneration)
 {
     if (!m_ready || !cmd || !color || !fullResMv || !reactive)
         return false;
@@ -472,6 +477,31 @@ bool FastMv::dispatch(ID3D12GraphicsCommandList* cmd,
                      reinterpret_cast<const uint32_t*>(&c),
                      sizeof(c) / sizeof(uint32_t),
                      renderSize.w, renderSize.h, cursor);
+    }
+
+    if (smoothForFrameGeneration) {
+        // Build a separate FG-only vector field; the FSR-facing fullResMv
+        // remains untouched by the smoothing pass.
+        transition(cmd, fullResMv, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transition(cmd, m_fgSmoothed.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                   D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        auto c = makeConstants(renderSize.w, renderSize.h,
+                               renderSize.w, renderSize.h,
+                               renderSize.w, renderSize.h, 0, 0);
+        ID3D12Resource* s[3] = { fullResMv, nullptr, nullptr };
+        DXGI_FORMAT sf[3] = { DXGI_FORMAT_R16G16_FLOAT,
+                              DXGI_FORMAT_R16_FLOAT, DXGI_FORMAT_R16G16_FLOAT };
+        ID3D12Resource* u[2] = { m_fgSmoothed.Get(), nullptr };
+        DXGI_FORMAT uf[2] = { DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16_FLOAT };
+        dispatchPass(cmd, m_smoothPso.Get(), s, sf, u, uf,
+                     reinterpret_cast<const uint32_t*>(&c),
+                     sizeof(c) / sizeof(uint32_t),
+                     renderSize.w, renderSize.h, cursor);
+        transition(cmd, m_fgSmoothed.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transition(cmd, fullResMv, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                   D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
 
     m_hasHistory = true;
