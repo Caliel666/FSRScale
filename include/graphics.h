@@ -44,6 +44,10 @@ public:
   // Stretch-blit src (any size, PIXEL/NON_PIXEL SRV state) onto the current
   // backbuffer (must already be in RENDER_TARGET state).
   void blitToBackbuffer(ID3D12Resource* src);
+  void blitInterpolatedToBackbuffer(ID3D12Resource* current, float blend);
+  bool copyBackbufferToHistory();
+  bool hasFrameHistory() const { return m_historyValid; }
+  void invalidateFrameHistory() { m_historyValid = false; }
 
   // Queue a PNG readback of the current backbuffer. Call after the final
   // FSR/blit pass and before end()/present(). present() completes the
@@ -78,6 +82,9 @@ private:
   HWND m_output = nullptr;
 
   ComPtr<ID3D12Resource> m_upscaleOutput;
+  ComPtr<ID3D12Resource> m_frameHistory;
+  bool m_historyInitialized = false;
+  bool m_historyValid = false;
   ComPtr<ID3D12Resource> m_dummyDepth;
   ComPtr<ID3D12Resource> m_motionVectors;
   ComPtr<ID3D12Resource> m_reactiveMask;
