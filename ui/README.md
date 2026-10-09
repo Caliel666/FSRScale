@@ -1,30 +1,28 @@
-# NRLive UI
+# NRLive Windows launcher
 
-Lossless Scaling–style launcher for **NRLive**.
+The launcher is a native **WPF / .NET 8** desktop app styled for Windows 11. Its layout and workflow take inspiration from Lossless Scaling and Magpie without copying their assets.
 
-## Quick run (script)
+## Build
 
-```powershell
-py -3 scale_ui.py
-```
-
-By default the UI looks for **`NRLive.exe` in the same folder** as the UI.
-
-## Build standalone .exe
+On Windows with the .NET 8 SDK:
 
 ```powershell
-.\build.bat
+dotnet publish .\NRLiveUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o .\build
 ```
 
-Creates a venv (`.venv`), installs PyInstaller, and writes:
+The result is `ui\build\NRLiveUI.exe`. GitHub Actions builds and publishes the launcher alongside NRLive.
 
-```
-build\NRLiveUI.exe
-build\profiles\Default.json
-```
+Place `NRLive.exe` beside the UI, or use **Browse for NRLive.exe…**.
 
-Copy `NRLive.exe` next to `build\NRLiveUI.exe` (or set the path in the UI).
+## Scaling workflow
 
-## Profiles
+- Press **Scale** or the global toggle hotkey (default `Ctrl+Alt+S`).
+- The button shows the countdown while NRLive silently tracks the foreground target. Switch to the game during this period.
+- The button changes to **Unscale**. Press it or the same toggle hotkey to terminate NRLive.
+- NRLive's own picker countdown window is intentionally hidden; the launcher owns the visible countdown.
 
-Stored as JSON under `profiles/` (next to the exe when frozen).
+The global toggle must differ from NRLive's stop key (`Ctrl+Shift+A` by default) and overlay key (`Ctrl+Home` by default).
+
+## Settings
+
+Profiles are JSON files under `profiles\`. The sharpening slider controls the native FSR upscaler sharpness value (0–1). FastMV is the default motion-vector implementation; AMDOF remains selectable.
