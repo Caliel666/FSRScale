@@ -47,5 +47,6 @@ OverlayFrameLimitConfig overlayFrameLimitConfig();
 bool overlayConsumeFgToggle();                // returns true once when the FG button is clicked
 bool overlayFgEnabled();
 void overlaySetFgEnabled(bool enabled);
+void overlaySetFgActive(bool active);
 const OverlayHudConfig& overlayConfig();
 std::wstring overlayScreenshotPath();
