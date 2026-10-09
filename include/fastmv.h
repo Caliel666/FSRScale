@@ -20,11 +20,7 @@ public:
                   ID3D12Resource* fullResMv,
                   ID3D12Resource* reactive,
                   Size renderSize,
-                  bool reset,
-                  bool smoothForFrameGeneration = false);
-    ID3D12Resource* frameGenerationMotionVectors() const {
-        return m_fgSmoothed ? m_fgSmoothed.Get() : nullptr;
-    }
+                  bool reset);
 
     bool available() const { return m_ready; }
     const std::wstring& lastError() const { return m_error; }
@@ -70,7 +66,6 @@ private:
     ComPtr<ID3D12Resource> m_luma[2][kMaxLevels];
     ComPtr<ID3D12Resource> m_grid[kMaxLevels];
     ComPtr<ID3D12Resource> m_filtered;
-    ComPtr<ID3D12Resource> m_fgSmoothed;
 
     ComPtr<ID3D12RootSignature> m_rs;
     ComPtr<ID3D12PipelineState> m_lumaPso;
@@ -78,7 +73,6 @@ private:
     ComPtr<ID3D12PipelineState> m_searchPso;
     ComPtr<ID3D12PipelineState> m_medianPso;
     ComPtr<ID3D12PipelineState> m_pixelPso;
-    ComPtr<ID3D12PipelineState> m_smoothPso;
     ComPtr<ID3D12DescriptorHeap> m_heap;
     UINT m_stride = 0;
 };
