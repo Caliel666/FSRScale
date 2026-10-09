@@ -1,5 +1,6 @@
 #include "fsr.h"
 #include "graphics.h"
+#include <algorithm>
 #include <ffx_api_loader.h>
 #include <cfloat>
 #include <mutex>
