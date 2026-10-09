@@ -226,6 +226,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     FrameLimiter frameLimiter;
     bool reset = true, running = true;
+    bool capturePausedForFocus = false;
+    bool wasOverlayOpen = false;
+    ULONGLONG overlayCloseGraceUntil = 0;
     bool stopLatched = false;
     float fps = 0;
     Size lastCs{};
@@ -248,6 +251,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (!running) break;
 
       pollOverlayToggle(spec);
+      const bool overlayOpenNow = isOverlayOpen();
+      // Closing the overlay is an intentional handoff back to the game.
+      // The overlay's popup can briefly remain the foreground HWND while the
+      // game receives focus; don't interpret that transient as Alt-Tab.
+      if (wasOverlayOpen && !overlayOpenNow) {
+        overlayCloseGraceUntil = GetTickCount64() + 500;
+        SetForegroundWindow(target);
+        setOutputFullscreen(out, mon);
+        overlaySetOpen(false); // reassert FPS HUD z-order after raising output
+      }
+      wasOverlayOpen = overlayOpenNow;
       pollBindBypass(out, spec);
       overlayConsumeFrameLimitToggle();
       const auto limitCfg = overlayFrameLimitConfig();
@@ -279,6 +293,51 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (!stopLatched) { running = false; break; }
         stopLatched = true;
       } else stopLatched = false;
+
+      // The output is fullscreen/topmost, so merely stopping frame acquisition
+      // leaves it covering the application selected by Alt-Tab. Hide it on focus
+      // loss, stop WGC, then recreate the capture session on return. Overlay mode
+      // is exempt because interacting with it intentionally takes focus from game.
+      auto isTargetForeground = [&]() {
+        HWND fg = GetForegroundWindow();
+        if (!fg) return false;
+        HWND fgRoot = GetAncestor(fg, GA_ROOTOWNER);
+        if (!fgRoot) fgRoot = GetAncestor(fg, GA_ROOT);
+        HWND targetRoot = GetAncestor(target, GA_ROOTOWNER);
+        if (!targetRoot) targetRoot = GetAncestor(target, GA_ROOT);
+        // The NRLive output/overlay may transiently own foreground during
+        // close; it is not a real focus loss. Treat it as a handoff only while
+        // the overlay was just closed (the explicit foreground restore above).
+        HWND outRoot = GetAncestor(out, GA_ROOTOWNER);
+        if (!outRoot) outRoot = GetAncestor(out, GA_ROOT);
+        const bool outputOwnsForeground = fg == out || fgRoot == outRoot;
+        return fg == target || fgRoot == targetRoot || fgRoot == target ||
+               fg == targetRoot || (outputOwnsForeground && GetTickCount64() < overlayCloseGraceUntil);
+      };
+      const bool shouldPauseCapture = !isOverlayOpen() && !isTargetForeground();
+      if (shouldPauseCapture && !capturePausedForFocus) {
+        gfx.waitForGpu();
+        cap.stop();
+        ShowWindow(out, SW_HIDE);
+        capturePausedForFocus = true;
+        continue;
+      }
+      if (shouldPauseCapture) {
+        Sleep(8);
+        continue;
+      }
+      if (capturePausedForFocus) {
+        if (!cap.start(target)) {
+          Sleep(8);
+          continue;
+        }
+        setOutputFullscreen(out, mon);
+        ShowWindow(out, SW_SHOWNOACTIVATE);
+        capturePausedForFocus = false;
+        reset = true;
+        QueryPerformanceCounter(&lastCaptured);
+        continue; // let WGC deliver a fresh frame before rendering
+      }
 
       if (frameLimiter.enabled() && frameLimiter.method() == 0)
         frameLimiter.wait(); // early mode: pace before capture/CPU preparation

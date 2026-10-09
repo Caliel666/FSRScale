@@ -37,6 +37,12 @@ static IDirect3DDevice makeWinrtDevice(ID3D11Device* d)
   return insp.as<IDirect3DDevice>();
 }
 
+Capture::~Capture()
+{
+  stop();
+  if (m_frameArrivedEvent) { CloseHandle(m_frameArrivedEvent); m_frameArrivedEvent = nullptr; }
+}
+
 bool Capture::init(ID3D12Device* d12, ID3D12CommandQueue* q)
 {
   m_d12 = d12;
@@ -386,7 +392,7 @@ void Capture::stop()
   if (m_sharedHandle) { CloseHandle(m_sharedHandle); m_sharedHandle = nullptr; }
   m_item = nullptr;
   m_hwnd = nullptr;
-  if (m_frameArrivedEvent) { CloseHandle(m_frameArrivedEvent); m_frameArrivedEvent = nullptr; }
+  // Keep the init-owned event alive across stop/start cycles for focus resume.
   m_size = {};
   m_windowSize = {};
   m_clientOffsetX = 0;
