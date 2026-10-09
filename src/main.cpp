@@ -394,12 +394,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (!gfx.ensureAuxTextures(cs)) throw std::runtime_error("auxiliary graphics textures could not be resized");
       if (fgOk && (cs.w > fgMaxRender.w || cs.h > fgMaxRender.h)) {
         gfx.waitForGpu();
-        fgOk = fg.resize(cs, display);
+        const bool resizedFg = fg.resize(cs, display);
         fgMaxRender = cs;
-        fgEnabled = fgOk && overlayFgEnabled();
-        overlaySetFgEnabled(fgEnabled);
+        if (!resizedFg) {
+          // Keep the wrapper alive and configure it off on the next frame;
+          // don't leave a stale generation callback registered.
+          fgEnabled = false;
+          overlaySetFgEnabled(false);
+          setStatus(out, fg.lastError().c_str());
+        } else {
+          fgEnabled = overlayFgEnabled();
+          overlaySetFgEnabled(fgEnabled);
+        }
         reset = true;
-        if (!fgOk) setStatus(out, fg.lastError().c_str());
       }
       QueryPerformanceCounter(&renderStart);
 

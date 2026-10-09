@@ -308,20 +308,15 @@ ffxReturnCode_t FsrFrameGeneration::generationCallback(
 bool FsrFrameGeneration::resize(Size maxRender, Size display)
 {
   std::lock_guard<std::mutex> lock(m_mutex);
-  if (!m_swapChainCtx || !g_ffx.CreateContext || !g_ffx.DestroyContext) {
-    m_error = L"FSR FG resize failed: swapchain context unavailable";
+  if (!m_swapChainCtx || !g_ffx.CreateContext || !g_ffx.DestroyContext || !m_device) {
+    m_error = L"FSR FG resize failed: swapchain context or device unavailable";
     return false;
   }
-  m_callbackEnabled = false;
-  m_failed = false;
-  if (m_ctx && g_ffx.DestroyContext)
-    g_ffx.DestroyContext(&m_ctx, nullptr);
-  m_ctx = nullptr;
 
+  const bool wasEnabled = m_callbackEnabled;
   ffxCreateBackendDX12Desc backend{};
   backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
   backend.header.pNext = nullptr;
-  // Recreate only the effect context; do not wrap an already wrapped swapchain.
   backend.device = m_device;
   ffxCreateContextDescFrameGeneration fg{};
   fg.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
@@ -331,12 +326,21 @@ bool FsrFrameGeneration::resize(Size maxRender, Size display)
   fg.displaySize = { display.w, display.h };
   fg.maxRenderSize = { maxRender.w, maxRender.h };
   fg.backBufferFormat = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM;
-  const ffxReturnCode_t rc = g_ffx.CreateContext(&m_ctx, &fg.header, nullptr);
-  if (rc != FFX_API_RETURN_OK || !m_ctx) {
-    m_ctx = nullptr;
+
+  // Create the replacement first. If allocation fails, the old context remains
+  // valid so the next frame can still configure the wrapper for safe fallback.
+  ffxContext resizedCtx = nullptr;
+  const ffxReturnCode_t rc = g_ffx.CreateContext(&resizedCtx, &fg.header, nullptr);
+  if (rc != FFX_API_RETURN_OK || !resizedCtx) {
+    m_callbackEnabled = wasEnabled;
     m_error = L"FSR FG resize context creation failed 0x" + hex((uint32_t)rc);
     return false;
   }
+  if (m_ctx && g_ffx.DestroyContext)
+    g_ffx.DestroyContext(&m_ctx, nullptr);
+  m_ctx = resizedCtx;
+  m_callbackEnabled = false;
+  m_failed = false;
   m_maxRender = maxRender;
   m_display = display;
   m_error = L"FSR FG context resized";
@@ -355,7 +359,7 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
     m_error = L"FSR FG prepare skipped: runtime or swapchain unavailable";
     return false;
   }
-  if (render.w > m_maxRender.w || render.h > m_maxRender.h ||
+  if ((enabled && (render.w > m_maxRender.w || render.h > m_maxRender.h)) ||
       display.w != m_display.w || display.h != m_display.h) {
     m_error = L"FSR FG prepare skipped: resolution changed; recreate context";
     return false;
