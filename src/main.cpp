@@ -224,6 +224,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     setOverlayOpen(false);
     setStatus(out, label.c_str());
 
+    // Create the actual AMD FSR Frame Generation context. The overlay toggle
+    // remains off unless the provider initializes successfully.
+    FsrFrameGeneration fg;
+    bool fgOk = fg.init(gfx.device(), render, display);
+    bool fgEnabled = fgOk && overlayFgEnabled();
+    overlaySetFgEnabled(fgEnabled);
+    Size fgMaxRender = render;
+    if (cliMode && hasConsole()) {
+      printCli(fgOk ? fg.lastError() : L"FSR FG unavailable: " + fg.lastError());
+    }
+
     FrameLimiter frameLimiter;
     bool reset = true, running = true;
     bool capturePausedForFocus = false;
@@ -266,7 +277,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       overlayConsumeFrameLimitToggle();
       const auto limitCfg = overlayFrameLimitConfig();
       frameLimiter.configure(limitCfg.enabled, limitCfg.fps, limitCfg.method);
-      if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
+      if (overlayConsumeFsrToggle() && fsrOk) {
+        fsrEnabled = !fsrEnabled;
+        overlaySetFsrEnabled(fsrEnabled);
+        reset = true;
+      }
+      if (overlayConsumeFgToggle()) {
+        fgEnabled = fgOk && overlayFgEnabled();
+        overlaySetFgEnabled(fgEnabled);
+        reset = true;
+      }
       drawCursor();
 
       // Camera requests are consumed only once a fresh capture frame is
@@ -367,6 +387,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       lastCs = cs;
       setScaleSizes(cs, display);
       if (!gfx.ensureAuxTextures(cs)) throw std::runtime_error("auxiliary graphics textures could not be resized");
+      if (fgOk && (cs.w > fgMaxRender.w || cs.h > fgMaxRender.h)) {
+        gfx.waitForGpu();
+        fg.shutdown();
+        fgOk = fg.init(gfx.device(), cs, display);
+        fgMaxRender = cs;
+        fgEnabled = fgOk && overlayFgEnabled();
+        overlaySetFgEnabled(fgEnabled);
+        reset = true;
+      }
       QueryPerformanceCounter(&renderStart);
 
       // Keep a Camera click pending until a frame is available. The actual
@@ -386,6 +415,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       ID3D12Resource* presentSrc = color.Get();
       bool usedFsr = false;
+      const bool resetThisFrame = reset;
 
       if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
@@ -503,6 +533,80 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         cmd->ResourceBarrier(n, b);
       }
 
+      // Run AMD's FSR FG prepare + interpolation workloads on the GPU after
+      // the post-FSR image and optical-flow inputs are ready. Only enable the
+      // first integration when the full FSR upscale/motion path succeeded.
+      bool generatedFramePresented = false;
+      ID3D12Resource* fgOutput = gfx.frameGenerationOutput();
+      if (fgEnabled && fgOk && usedFsr && fgOutput && depth && mv) {
+        D3D12_RESOURCE_BARRIER toRead[2]{};
+        ID3D12Resource* inputs[2] = { depth, mv };
+        for (int i = 0; i < 2; ++i) {
+          toRead[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+          toRead[i].Transition.pResource = inputs[i];
+          toRead[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+          toRead[i].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+          toRead[i].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        }
+        cmd->ResourceBarrier(2, toRead);
+        const bool fgDispatched = fg.dispatch(cmd, presentSrc, depth, mv, fgOutput,
+                                               gfx.swapChain(), cs, display, dt, resetThisFrame);
+        D3D12_RESOURCE_BARRIER toWrite[2]{};
+        for (int i = 0; i < 2; ++i) {
+          toWrite[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+          toWrite[i].Transition.pResource = inputs[i];
+          toWrite[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+          toWrite[i].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+          toWrite[i].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        }
+        cmd->ResourceBarrier(2, toWrite);
+
+        if (fgDispatched) {
+          D3D12_RESOURCE_BARRIER fgToRead{};
+          fgToRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+          fgToRead.Transition.pResource = fgOutput;
+          fgToRead.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+          fgToRead.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+          fgToRead.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+          cmd->ResourceBarrier(1, &fgToRead);
+          const float fgClear[4] = { 0, 0, 0, 1 };
+          cmd->ClearRenderTargetView(gfx.rtvHandle(), fgClear, 0, nullptr);
+          gfx.blitToBackbuffer(fgOutput);
+
+          D3D12_RESOURCE_BARRIER fgRestore[2]{};
+          fgRestore[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+          fgRestore[0].Transition.pResource = fgOutput;
+          fgRestore[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+          fgRestore[0].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+          fgRestore[0].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+          fgRestore[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+          fgRestore[1].Transition.pResource = back;
+          fgRestore[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+          fgRestore[1].Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+          fgRestore[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+          cmd->ResourceBarrier(2, fgRestore);
+          gfx.end();
+          if (frameLimiter.enabled() && frameLimiter.method() == 1)
+            frameLimiter.wait();
+          gfx.present();
+
+          gfx.begin();
+          back = gfx.backbuffer();
+          D3D12_RESOURCE_BARRIER nextBack{};
+          nextBack.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+          nextBack.Transition.pResource = back;
+          nextBack.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+          nextBack.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+          nextBack.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+          cmd->ResourceBarrier(1, &nextBack);
+          generatedFramePresented = true;
+        }
+      }
+
       const float clear[4] = { 0, 0, 0, 1 };
       cmd->ClearRenderTargetView(gfx.rtvHandle(), clear, 0, nullptr);
       gfx.blitToBackbuffer(presentSrc);
@@ -535,7 +639,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
 
       gfx.end();
-      if (frameLimiter.enabled() && frameLimiter.method() == 1)
+      if (frameLimiter.enabled() && frameLimiter.method() == 1 && !generatedFramePresented)
         frameLimiter.wait(); // late mode: finish CPU command recording before pacing
       gfx.present();
       QueryPerformanceCounter(&renderEnd);
@@ -563,6 +667,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     fastmv.shutdown();
     amdof.shutdown();
+    fg.shutdown();
     fsr.shutdown();
     overlayShutdown();
     cap.stop();
