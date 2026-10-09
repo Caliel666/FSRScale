@@ -242,6 +242,7 @@ bool Graphics::buildSwapChain(Size display)
   }
 
   m_upscaleOutput.Reset();
+  m_frameGenerationOutput.Reset();
   {
     D3D12_RESOURCE_DESC od{};
     od.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -255,6 +256,8 @@ bool Graphics::buildSwapChain(Size display)
     ohp.CreationNodeMask = 1; ohp.VisibleNodeMask = 1;
     hr(m_dev->CreateCommittedResource(&ohp, D3D12_HEAP_FLAG_NONE, &od,
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&m_upscaleOutput)));
+    hr(m_dev->CreateCommittedResource(&ohp, D3D12_HEAP_FLAG_NONE, &od,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_frameGenerationOutput)));
   }
   return true;
 }
@@ -264,6 +267,7 @@ bool Graphics::resize(Size display)
   if (display.w == m_display.w && display.h == m_display.h) return true;
   for (auto& b : m_back) b.Reset();
   m_upscaleOutput.Reset();
+  m_frameGenerationOutput.Reset();
   m_swap1.Reset(); m_swap.Reset();
   m_lastBlitSrc = nullptr;     // cached SRV is stale after swapchain rebuild
   m_lastBlitFmt = DXGI_FORMAT_UNKNOWN;
