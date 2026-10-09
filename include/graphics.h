@@ -13,6 +13,9 @@ class Graphics {
 public:
   bool init(HWND output, Size render, Size display);
   bool resize(Size display);
+  // Release all app-owned references before AMD replaces the swapchain.
+  void releaseSwapChainForWrap();
+  bool rebuildSwapChain(Size display);
   bool adoptSwapChain(IDXGISwapChain4* wrapped);
   bool begin();
   void end();
