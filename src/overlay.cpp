@@ -49,6 +49,7 @@ static bool g_toggleFsr = false, g_screenshot = false, g_toggleFrameLimit = fals
 static OverlayFrameLimitConfig g_frameLimit{};
 static bool g_fgEnabled = false;
 static bool g_fgActive = false;
+static float g_sharpness = 0.65f;
 static OverlayHudConfig g_cfg{};
 static std::wstring g_shotPath;
 static float g_lastFps = 0, g_lastMs = 0;
@@ -76,6 +77,7 @@ static void loadCfg() {
   g_frameLimit.fps = frame_limit::clampFps(GetPrivateProfileIntW(L"FrameLimiter", L"fps", 60, ini.c_str()));
   g_frameLimit.method = frame_limit::normalizeMethod(GetPrivateProfileIntW(L"FrameLimiter", L"method", 0, ini.c_str()));
   g_fgEnabled = GetPrivateProfileIntW(L"FrameGeneration", L"enabled", 0, ini.c_str()) != 0;
+  g_sharpness = std::clamp(GetPrivateProfileIntW(L"FSR", L"sharpness", 65, ini.c_str()) / 100.0f, 0.0f, 1.0f);
   g_cfg.fps = GetPrivateProfileIntW(L"FPS", L"fps", 1, ini.c_str()) != 0;
   g_cfg.frametime = GetPrivateProfileIntW(L"FPS", L"frametime", 1, ini.c_str()) != 0;
   g_cfg.frame_timing = GetPrivateProfileIntW(L"FPS", L"frame_timing", 1, ini.c_str()) != 0;
@@ -112,6 +114,8 @@ static void saveCfg() {
   swprintf_s(limitValue, L"%d", g_frameLimit.fps); WritePrivateProfileStringW(L"FrameLimiter", L"fps", limitValue, ini.c_str());
   swprintf_s(limitValue, L"%d", g_frameLimit.method); WritePrivateProfileStringW(L"FrameLimiter", L"method", limitValue, ini.c_str());
   WritePrivateProfileStringW(L"FrameGeneration", L"enabled", g_fgEnabled ? L"1" : L"0", ini.c_str());
+  wchar_t sharpnessValue[16]{}; swprintf_s(sharpnessValue, L"%d", (int)std::lround(g_sharpness * 100.0f));
+  WritePrivateProfileStringW(L"FSR", L"sharpness", sharpnessValue, ini.c_str());
 }
 
 // ── GDI helpers ───────────────────────────────────────────────────────────
@@ -377,16 +381,19 @@ static void paintSettings(HWND h, HDC dc) {
   auto section=[&](const wchar_t* s,int y){HFONT f=makeFont(12,true);auto o=(HFONT)SelectObject(dc,f);SetTextColor(dc,C_RED);RECT r{24,y,rc.right-24,y+18};DrawTextW(dc,s,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);HPEN p=CreatePen(PS_SOLID,1,C_CARD2);auto op=(HPEN)SelectObject(dc,p);MoveToEx(dc,24,y+21,nullptr);LineTo(dc,rc.right-24,y+21);SelectObject(dc,op);DeleteObject(p);SelectObject(dc,o);DeleteObject(f);};
   section(L"FPS OVERLAY",58);
   section(L"APPEARANCE",148);
-  section(L"FRAME LIMITER",278);
-  section(L"SCREENSHOT",350);
+  section(L"FSR SHARPENING",278);
+  section(L"FRAME LIMITER",352);
+  section(L"SCREENSHOT",424);
   // Slider labels/values are painted here; the native trackbars remain for interaction.
   drawText(dc,L"Font size",24,176,13,C_TEXT,false);
   drawText(dc,L"Bg alpha",24,212,13,C_TEXT,false);
   drawText(dc,L"Engine",24,248,12,C_DIM,false); drawText(dc,L"Text",130,248,12,C_DIM,false); drawText(dc,L"Graph",224,248,12,C_DIM,false);
   auto swatch=[&](int x,COLORREF col){HBRUSH br=CreateSolidBrush(col);RECT r{x,246,x+40,268};FillRect(dc,&r,br);DeleteObject(br);HPEN p=CreatePen(PS_SOLID,1,C_HOVER);auto op=(HPEN)SelectObject(dc,p);auto ob=(HBRUSH)SelectObject(dc,GetStockObject(NULL_BRUSH));Rectangle(dc,r.left,r.top,r.right,r.bottom);SelectObject(dc,ob);SelectObject(dc,op);DeleteObject(p);};
   swatch(80,g_cfg.engine_color);swatch(174,g_cfg.text_color);swatch(268,g_cfg.frametime_color);
-  drawText(dc,L"Cap FPS",142,304,13,C_TEXT,false);
-  drawText(dc,L"Folder",24,366,13,C_TEXT,false); drawText(dc,L"Saved to scaleconfig.ini",24,490,10,C_MUTED,false);
+  drawText(dc,L"Sharpening",24,304,13,C_TEXT,false);
+  wchar_t sharp[16]{}; swprintf_s(sharp, L"%.2f", g_sharpness); drawText(dc,sharp,410,304,13,C_RED_HOT,false);
+  drawText(dc,L"Cap FPS",142,378,13,C_TEXT,false);
+  drawText(dc,L"Folder",24,440,13,C_TEXT,false); drawText(dc,L"Saved to scaleconfig.ini",24,564,10,C_MUTED,false);
 }
 
 static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -410,7 +417,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           else { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
             wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
             SendMessageW(GetDlgItem(g_settings, 207), CB_SETCURSEL, g_frameLimit.method, 0);
-            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-540)/2, 480, 540, SWP_NOACTIVATE|SWP_SHOWWINDOW);
+            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-620)/2, 480, 620, SWP_NOACTIVATE|SWP_SHOWWINDOW);
             InvalidateRect(g_settings, nullptr, TRUE); } }
         InvalidateRect(h, nullptr, FALSE); UpdateWindow(h); return 0;
       }
@@ -548,7 +555,12 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   if (m == WM_HSCROLL) {
     HWND ctrl = (HWND)l;
-    if (ctrl == GetDlgItem(h, 201)) {
+    if (ctrl == GetDlgItem(h, 208)) {
+      g_sharpness = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
+      SetWindowTextW(GetDlgItem(h, 303), sharpText);
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 201)) {
       g_cfg.fontSize = (int)SendMessageW(ctrl, TBM_GETPOS, 0, 0);
       wchar_t b[8]; swprintf_s(b, L"%d", g_cfg.fontSize);
       SetWindowTextW(GetDlgItem(h, 301), b); saveCfg(); updateFpsPos();
@@ -583,7 +595,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   // Settings panel
   { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
     g_settings = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, SET_CLS, L"",
-      WS_POPUP, (sw-480)/2, (sh-540)/2, 480, 540, nullptr, nullptr, inst, nullptr); }
+      WS_POPUP, (sw-480)/2, (sh-620)/2, 480, 620, nullptr, nullptr, inst, nullptr); }
 
   if (g_settings) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 84, 80, 22, g_settings, (HMENU)101, inst, nullptr);
@@ -719,6 +731,7 @@ bool overlayConsumeFsrToggle() { bool v = g_toggleFsr; g_toggleFsr = false; retu
 bool overlayConsumeScreenshot() { bool v = g_screenshot; g_screenshot = false; return v; }
 bool overlayConsumeFrameLimitToggle() { bool v = g_toggleFrameLimit; g_toggleFrameLimit = false; return v; }
 OverlayFrameLimitConfig overlayFrameLimitConfig() { return g_frameLimit; }
+float overlaySharpness() { return g_sharpness; }
 bool overlayConsumeFgToggle() { bool v = g_toggleFg; g_toggleFg = false; return v; }
 bool overlayFgEnabled() { return g_fgEnabled; }
 void overlaySetFgEnabled(bool enabled) {
