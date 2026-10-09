@@ -64,7 +64,7 @@ target_include_directories(NRLive PRIVATE
 )
 
 target_compile_definitions(NRLive PRIVATE
-  UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
+  UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN PLATFORM_WINDOWS
 )
 
 target_link_libraries(NRLive PRIVATE
