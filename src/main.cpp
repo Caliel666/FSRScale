@@ -9,6 +9,7 @@
 #include "frametrace.h"
 #include "frame_limiter.h"
 #include "frame_timing.h"
+#include "reshade_detect.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
@@ -155,6 +156,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     if (cliMode && hasConsole()) printCli(label);
     else MessageBoxW(nullptr, label.c_str(), L"NRLive", MB_ICONERROR);
     return 2;
+  }
+
+  // ReShade is special-cased by detecting its public addon exports in the
+  // selected game's process (not by DLL name). Keep the normal OptiScaler /
+  // FSR integration untouched; this flag documents which input path is active.
+  DWORD targetPid = 0;
+  GetWindowThreadProcessId(target, &targetPid);
+  const ReShadeDetection reshade = detectReShadeInProcess(targetPid);
+  if (reshade.hooked) {
+    logMain(L"ReShade detected in target process: " + reshade.modulePath);
+    logMain(L"ReShade-specific path: captured game image is the pre-FSR input; do not apply ReShade to generated output frames.");
+  } else {
+    logMain(L"ReShade not detected in target process; using existing FSR/FG path.");
   }
 
   HWND out = createOutput(inst, 1280, 720);
