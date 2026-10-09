@@ -50,6 +50,11 @@ public:
   // backbuffer (must already be in RENDER_TARGET state).
   void blitToBackbuffer(ID3D12Resource* src);
 
+  // Blit capture color to a tagged render target. ReShade's pre-FSR add-on
+  // renders effects into this target when it is unbound.
+  ID3D12Resource* preFsrColor() const { return m_preFsrColor.Get(); }
+  void blitToPreFsr(ID3D12Resource* src);
+
   // Queue a PNG readback of the current backbuffer. Call after the final
   // FSR/blit pass and before end()/present(). present() completes the
   // readback only when a screenshot was requested.
@@ -96,6 +101,9 @@ private:
   // Cached blit SRV — recreate only when the source resource pointer changes.
   ID3D12Resource* m_lastBlitSrc = nullptr;
   DXGI_FORMAT m_lastBlitFmt = DXGI_FORMAT_UNKNOWN;
+  ID3D12Resource* m_lastPreFsrSrc = nullptr;
+  DXGI_FORMAT m_lastPreFsrFmt = DXGI_FORMAT_UNKNOWN;
+  ComPtr<ID3D12Resource> m_preFsrColor;
 
   // One-shot screenshot readback. Kept alive until present() has submitted
   // the command list and waited for its fence.
