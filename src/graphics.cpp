@@ -140,11 +140,79 @@ void Graphics::blitToBackbuffer(ID3D12Resource* src)
   m_cmd->DrawInstanced(3, 1, 0, 0);
 }
 
+
+void Graphics::blitToPreFsr(ID3D12Resource* src)
+{
+  if (!src || !m_preFsrColor || !m_blitPso || !m_srvHeap) return;
+
+  // Keep this source SRV separate from the final presentation blit descriptor:
+  // both draws are recorded into the same command list before GPU execution.
+  const D3D12_RESOURCE_DESC srcDesc = src->GetDesc();
+  if (src != m_lastPreFsrSrc || srcDesc.Format != m_lastPreFsrFmt) {
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Format = srcDesc.Format;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Texture2D.MipLevels = 1;
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+    cpu.ptr += m_srvStride;
+    m_dev->CreateShaderResourceView(src, &srv, cpu);
+    m_lastPreFsrSrc = src;
+    m_lastPreFsrFmt = srcDesc.Format;
+  }
+
+  ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
+  m_cmd->SetDescriptorHeaps(1, heaps);
+  m_cmd->SetGraphicsRootSignature(m_blitRs.Get());
+  m_cmd->SetPipelineState(m_blitPso.Get());
+  D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+  gpu.ptr += m_srvStride;
+  m_cmd->SetGraphicsRootDescriptorTable(0, gpu);
+
+  D3D12_VIEWPORT vp{ 0, 0, static_cast<float>(m_render.w), static_cast<float>(m_render.h), 0, 1 };
+  D3D12_RECT sc{ 0, 0, static_cast<LONG>(m_render.w), static_cast<LONG>(m_render.h) };
+  m_cmd->RSSetViewports(1, &vp);
+  m_cmd->RSSetScissorRects(1, &sc);
+
+  D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_rtvBase;
+  rtv.ptr += static_cast<SIZE_T>(3) * m_rtvStride;
+  m_cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+  m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  m_cmd->DrawInstanced(3, 1, 0, 0);
+
+  // This explicit unbind is the synchronization point observed by the ReShade
+  // add-on. It injects effect passes before the target transitions to SRV state.
+  m_cmd->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+}
+
 bool Graphics::createAuxTextures(Size render)
 {
   if (render.w == 0 || render.h == 0) return false;
   m_render = render;
   D3D12_HEAP_PROPERTIES hp{};
+
+  m_preFsrColor.Reset();
+  {
+    D3D12_RESOURCE_DESC rd{};
+    rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rd.Width = render.w; rd.Height = render.h;
+    rd.DepthOrArraySize = 1; rd.MipLevels = 1;
+    rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    rd.SampleDesc.Count = 1;
+    rd.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    D3D12_CLEAR_VALUE clear{};
+    clear.Format = rd.Format;
+    clear.Color[3] = 1.0f;
+    hr(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        &clear, IID_PPV_ARGS(&m_preFsrColor)));
+    m_preFsrColor->SetName(L"NRLive_PreFSR_Color");
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv = m_rtvBase;
+    rtv.ptr += static_cast<SIZE_T>(3) * m_rtvStride;
+    m_dev->CreateRenderTargetView(m_preFsrColor.Get(), nullptr, rtv);
+  }
+
+
   hp.Type = D3D12_HEAP_TYPE_DEFAULT;
   hp.CreationNodeMask = 1;
   hp.VisibleNodeMask = 1;
@@ -239,7 +307,7 @@ bool Graphics::buildSwapChain(Size display)
   m_index = m_swap->GetCurrentBackBufferIndex();
 
   D3D12_DESCRIPTOR_HEAP_DESC hd{};
-  hd.NumDescriptors = 3;
+  hd.NumDescriptors = 4; // two swapchain buffers plus reserved pre-FSR RTVs
   hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
   if (!m_rtv) hr(m_dev->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&m_rtv)));
   m_rtvStride = m_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
