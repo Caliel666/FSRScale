@@ -1,13 +1,13 @@
 #pragma once
-#include <windows.h>
 #include <string>
 
 struct ReShadeDetection {
-  bool hooked = false;
-  std::wstring modulePath;
+  bool enabled = false;
+  std::wstring markerPath;
 };
 
-// Detects ReShade by its public addon exports, not by DLL filename.
-// This deliberately targets the selected game's process; DLL names alone
-// are unreliable because proxy loaders and renamed modules are common.
-ReShadeDetection detectReShadeInProcess(DWORD processId);
+// Select the ReShade-specific pipeline when ReShade.ini or amd-nr.addon64
+// sits beside NRLive.exe. Do not inspect the selected game's loaded modules:
+// ReShade may be injected into NRLiveUI.exe, and module enumeration is both
+// unreliable and unrelated to which pipeline NRLive should select.
+ReShadeDetection detectReShadeMode();
