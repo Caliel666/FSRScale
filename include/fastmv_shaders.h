@@ -170,6 +170,34 @@ void main(uint3 id : SV_DispatchThreadID)
 }
 )";
 
+inline constexpr const char* SmoothForFrameGeneration = R"(
+Texture2D<float2> src : register(t0);
+RWTexture2D<float2> dst : register(u0);
+[numthreads(8,8,1)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= size.x || id.y >= size.y) return;
+    int2 p = int2(id.xy);
+    int2 last = int2(size) - 1;
+    float2 center = src.Load(int3(p, 0));
+    float2 sum = center * 4.0;
+    float total = 4.0;
+    [unroll] for (int y = -1; y <= 1; ++y)
+    {
+        [unroll] for (int x = -1; x <= 1; ++x)
+        {
+            if (x == 0 && y == 0) continue;
+            float2 v = src.Load(int3(clamp(p + int2(x,y), int2(0,0), last), 0));
+            float diff = length(v - center);
+            float w = (x == 0 || y == 0 ? 1.5 : 1.0) * exp(-diff * 0.65);
+            sum += v * w;
+            total += w;
+        }
+    }
+    dst[p] = lerp(center, sum / max(total, 1e-4), 0.72);
+}
+)";
+
 // Full-resolution resolve.  Each pixel considers zero motion, its block's
 // vector, and the three adjacent block vectors.  The best local 3x3 match
 // wins.  The same match error becomes a conservative reactive/distrust mask.
