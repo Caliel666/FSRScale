@@ -52,6 +52,7 @@ public:
   void shutdown();
   const std::wstring& lastError() const { return m_error; }
   bool ready() const { return m_ctx != nullptr; }
+  bool failed() const;
 
 private:
   static ffxReturnCode_t generationCallback(ffxDispatchDescFrameGeneration* params, void* userCtx);
@@ -63,6 +64,7 @@ private:
   Size m_display{};
   uint64_t m_frameId = 0;
   bool m_callbackEnabled = false;
-  std::mutex m_mutex;
+  bool m_failed = false;
+  mutable std::mutex m_mutex;
   std::wstring m_error;
 };

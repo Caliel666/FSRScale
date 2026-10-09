@@ -613,6 +613,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (frameLimiter.enabled() && frameLimiter.method() == 1)
         frameLimiter.wait(); // late mode: finish CPU command recording before pacing
       gfx.present();
+      if (fgOk && fg.failed()) {
+        fgEnabled = false;
+        overlaySetFgEnabled(false);
+        if (cliMode && hasConsole())
+          printCli(L"FSR FG disabled after generation failure: " + fg.lastError());
+        setStatus(out, fg.lastError().c_str());
+      }
       QueryPerformanceCounter(&renderEnd);
       const double acquireMs = (acquireEnd.QuadPart - acquireStart.QuadPart) * 1000.0 / double(freq.QuadPart);
       const double renderCpuMs = (renderEnd.QuadPart - renderStart.QuadPart) * 1000.0 / double(freq.QuadPart);

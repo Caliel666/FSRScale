@@ -278,6 +278,7 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
   m_display = display;
   m_frameId = 0;
   m_callbackEnabled = false;
+  m_failed = false;
   m_error = L"FSR FG ready; AMD frame-interpolation swapchain active [" + g_info + L"]";
   return true;
 }
@@ -294,8 +295,11 @@ ffxReturnCode_t FsrFrameGeneration::generationCallback(
   if (!self->m_callbackEnabled)
     return FFX_API_RETURN_OK;
   const ffxReturnCode_t rc = g_ffx.Dispatch(&self->m_ctx, &params->header);
-  if (rc != FFX_API_RETURN_OK)
+  if (rc != FFX_API_RETURN_OK) {
+    self->m_failed = true;
+    self->m_callbackEnabled = false;
     self->m_error = L"FSR FG generation callback failed 0x" + hex((uint32_t)rc);
+  }
   return rc;
 }
 
@@ -307,6 +311,7 @@ bool FsrFrameGeneration::resize(Size maxRender, Size display)
     return false;
   }
   m_callbackEnabled = false;
+  m_failed = false;
   if (m_ctx && g_ffx.DestroyContext)
     g_ffx.DestroyContext(&m_ctx, nullptr);
   m_ctx = nullptr;
@@ -342,6 +347,10 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
                                  Size render, Size display,
                                  float dt, bool reset, bool enabled)
 {
+  if (m_failed) {
+    m_error = L"FSR FG disabled after generation callback failure";
+    return false;
+  }
   if (!m_ctx || !m_swapChainCtx || !g_ffx.Configure || !g_ffx.Dispatch || !cmd) {
     m_error = L"FSR FG prepare skipped: runtime or swapchain unavailable";
     return false;
@@ -421,6 +430,12 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
   ++m_frameId;
   m_error = enabled ? L"FSR FG prepared for paced Present" : L"FSR FG disabled for this frame";
   return true;
+}
+
+bool FsrFrameGeneration::failed() const
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_failed;
 }
 
 void FsrFrameGeneration::shutdown()
