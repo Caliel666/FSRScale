@@ -225,7 +225,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
-    fsr.setSharpening(true, spec.sharpness);
     logMain(fsrOk ? L"FSR upscaler init OK: " + fsr.lastError() : L"FSR upscaler init FAILED: " + fsr.lastError());
     bool fsrEnabled = fsrOk;
     if (cliMode && hasConsole()) {
@@ -247,6 +246,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     }
 
     overlayInit(inst, out);
+    fsr.setSharpening(true, overlaySharpness());
     overlaySetFsrEnabled(fsrEnabled);
     setOverlayHud(nullptr);
     setOverlayOpen(false);
@@ -310,6 +310,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (!running) break;
 
       pollOverlayToggle(spec);
+      if (fsrOk) fsr.setSharpening(true, overlaySharpness());
       const bool overlayOpenNow = isOverlayOpen();
       // Closing the overlay is an intentional handoff back to the game.
       // The overlay's popup can briefly remain the foreground HWND while the
