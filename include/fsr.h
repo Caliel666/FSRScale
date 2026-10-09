@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <d3d12.h>
 #include <string>
+#include <mutex>
 #include <ffx_api/ffx_api.h>
 #include <ffx_api/ffx_upscale.h>
 #include <ffx_api/ffx_framegeneration.h>
@@ -40,23 +41,26 @@ private:
 // intermediate frame to a GPU texture for presentation.
 class FsrFrameGeneration {
 public:
-  bool init(ID3D12Device* device, Size maxRender, Size display);
-  bool dispatch(ID3D12GraphicsCommandList* cmd,
-                ID3D12Resource* presentColor,
-                ID3D12Resource* depth,
-                ID3D12Resource* motionVectors,
-                ID3D12Resource* output,
-                void* swapChain,
-                Size render, Size display,
-                float dt, bool reset);
+  bool init(ID3D12Device* device, Size maxRender, Size display,
+            IDXGISwapChain4** swapChain, ID3D12CommandQueue* queue);
+  bool prepare(ID3D12GraphicsCommandList* cmd,
+               ID3D12Resource* depth,
+               ID3D12Resource* motionVectors,
+               Size render, Size display,
+               float dt, bool reset, bool enabled);
   void shutdown();
   const std::wstring& lastError() const { return m_error; }
   bool ready() const { return m_ctx != nullptr; }
 
 private:
+  static ffxReturnCode_t generationCallback(ffxDispatchDescFrameGeneration* params, void* userCtx);
   ffxContext m_ctx = nullptr;
+  ffxContext m_swapChainCtx = nullptr;
+  IDXGISwapChain4* m_swapChain = nullptr;
   Size m_maxRender{};
   Size m_display{};
   uint64_t m_frameId = 0;
+  bool m_callbackEnabled = false;
+  std::mutex m_mutex;
   std::wstring m_error;
 };

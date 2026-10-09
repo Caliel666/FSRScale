@@ -227,7 +227,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     // Create the actual AMD FSR Frame Generation context. The overlay toggle
     // remains off unless the provider initializes successfully.
     FsrFrameGeneration fg;
-    bool fgOk = fg.init(gfx.device(), render, display);
+    IDXGISwapChain4* fgSwapChain = gfx.swapChain();
+    bool fgOk = fg.init(gfx.device(), render, display, &fgSwapChain, gfx.queue());
+    if (fgOk && fgSwapChain != gfx.swapChain() && !gfx.adoptSwapChain(fgSwapChain)) {
+      fg.shutdown();
+      fgOk = false;
+    }
     bool fgEnabled = fgOk && overlayFgEnabled();
     overlaySetFgEnabled(fgEnabled);
     Size fgMaxRender = render;
@@ -533,85 +538,42 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         cmd->ResourceBarrier(n, b);
       }
 
-      // Run AMD's FSR FG prepare + interpolation workloads on the GPU after
-      // the post-FSR image and optical-flow inputs are ready. Only enable the
-      // first integration when the full FSR upscale/motion path succeeded.
-      bool generatedFramePresented = false;
-      ID3D12Resource* fgOutput = gfx.frameGenerationOutput();
-      if (fgEnabled && fgOk && usedFsr && fgOutput && depth && mv) {
-        D3D12_RESOURCE_BARRIER toRead[2]{};
-        ID3D12Resource* inputs[2] = { depth, mv };
-        for (int i = 0; i < 2; ++i) {
-          toRead[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-          toRead[i].Transition.pResource = inputs[i];
-          toRead[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-          toRead[i].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-          toRead[i].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
-                                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-        }
-        cmd->ResourceBarrier(2, toRead);
-        const bool fgDispatched = fg.dispatch(cmd, presentSrc, depth, mv, fgOutput,
-                                               gfx.swapChain(), cs, display, dt, resetThisFrame);
-        D3D12_RESOURCE_BARRIER toWrite[2]{};
-        for (int i = 0; i < 2; ++i) {
-          toWrite[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-          toWrite[i].Transition.pResource = inputs[i];
-          toWrite[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-          toWrite[i].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+      // The FFX frame-interpolation swapchain owns generation and pacing.
+      // Configure every output frame, but only prepare when FSR inputs are valid.
+      const bool runFgThisFrame = fgEnabled && fgOk && usedFsr && depth && mv;
+      bool fgPrepared = true;
+      if (fgOk) {
+        if (runFgThisFrame) {
+          D3D12_RESOURCE_BARRIER toRead[2]{};
+          ID3D12Resource* inputs[2] = { depth, mv };
+          for (int i = 0; i < 2; ++i) {
+            toRead[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            toRead[i].Transition.pResource = inputs[i];
+            toRead[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            toRead[i].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            toRead[i].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
                                               D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-          toWrite[i].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        }
-        cmd->ResourceBarrier(2, toWrite);
-
-        if (fgDispatched) {
-          D3D12_RESOURCE_BARRIER fgToRead{};
-          fgToRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-          fgToRead.Transition.pResource = fgOutput;
-          fgToRead.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-          fgToRead.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-          fgToRead.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
-                                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-          cmd->ResourceBarrier(1, &fgToRead);
-          const float fgClear[4] = { 0, 0, 0, 1 };
-          cmd->ClearRenderTargetView(gfx.rtvHandle(), fgClear, 0, nullptr);
-          gfx.blitToBackbuffer(fgOutput);
-
-          D3D12_RESOURCE_BARRIER fgRestore[2]{};
-          fgRestore[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-          fgRestore[0].Transition.pResource = fgOutput;
-          fgRestore[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-          fgRestore[0].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+          }
+          cmd->ResourceBarrier(2, toRead);
+          fgPrepared = fg.prepare(cmd, depth, mv, cs, display, dt, resetThisFrame, true);
+          D3D12_RESOURCE_BARRIER toWrite[2]{};
+          for (int i = 0; i < 2; ++i) {
+            toWrite[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            toWrite[i].Transition.pResource = inputs[i];
+            toWrite[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            toWrite[i].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
                                                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-          fgRestore[0].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-          fgRestore[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-          fgRestore[1].Transition.pResource = back;
-          fgRestore[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-          fgRestore[1].Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-          fgRestore[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-          cmd->ResourceBarrier(2, fgRestore);
-          gfx.end();
-          if (frameLimiter.enabled() && frameLimiter.method() == 1)
-            frameLimiter.wait();
-          gfx.present();
-
-          gfx.begin();
-          back = gfx.backbuffer();
-          D3D12_RESOURCE_BARRIER nextBack{};
-          nextBack.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-          nextBack.Transition.pResource = back;
-          nextBack.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-          nextBack.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-          nextBack.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-          cmd->ResourceBarrier(1, &nextBack);
-          generatedFramePresented = true;
+            toWrite[i].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+          }
+          cmd->ResourceBarrier(2, toWrite);
         } else {
-          // Do not keep paying a per-frame cost when the provider refuses a
-          // dispatch. Fall back to the ordinary FSR/blit path and persist the
-          // disabled state so the user doesn't unknowingly run a failing FG path.
+          fgPrepared = fg.prepare(cmd, nullptr, nullptr, cs, display, dt, resetThisFrame, false);
+        }
+        if (!fgPrepared && runFgThisFrame) {
           fgEnabled = false;
           overlaySetFgEnabled(false);
           if (cliMode && hasConsole())
-            printCli(L"FSR FG disabled after dispatch failure: " + fg.lastError());
+            printCli(L"FSR FG disabled after prepare failure: " + fg.lastError());
           setStatus(out, fg.lastError().c_str());
         }
       }
@@ -648,7 +610,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       }
 
       gfx.end();
-      if (frameLimiter.enabled() && frameLimiter.method() == 1 && !generatedFramePresented)
+      if (frameLimiter.enabled() && frameLimiter.method() == 1)
         frameLimiter.wait(); // late mode: finish CPU command recording before pacing
       gfx.present();
       QueryPerformanceCounter(&renderEnd);

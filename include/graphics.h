@@ -13,6 +13,7 @@ class Graphics {
 public:
   bool init(HWND output, Size render, Size display);
   bool resize(Size display);
+  bool adoptSwapChain(IDXGISwapChain4* wrapped);
   bool begin();
   void end();
   ID3D12Device* device() const { return m_dev.Get(); }
@@ -24,7 +25,6 @@ public:
   ID3D12Resource* dummyDepth() const { return m_dummyDepth.Get(); }
   ID3D12Resource* motionVectors() const { return m_motionVectors.Get(); }
   ID3D12Resource* reactiveMask() const { return m_reactiveMask.Get(); }
-  ID3D12Resource* frameGenerationOutput() const { return m_frameGenerationOutput.Get(); }
   D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle() const {
     D3D12_CPU_DESCRIPTOR_HANDLE h = m_rtvBase;
     h.ptr += (SIZE_T)m_index * m_rtvStride;
@@ -83,7 +83,6 @@ private:
   ComPtr<ID3D12Resource> m_dummyDepth;
   ComPtr<ID3D12Resource> m_motionVectors;
   ComPtr<ID3D12Resource> m_reactiveMask;
-  ComPtr<ID3D12Resource> m_frameGenerationOutput;
   ComPtr<ID3D12DescriptorHeap> m_clearGpuHeap;
   ComPtr<ID3D12DescriptorHeap> m_clearCpuHeap;
 
