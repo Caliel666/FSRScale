@@ -225,6 +225,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
+    fsr.setSharpening(true, spec.sharpness);
     logMain(fsrOk ? L"FSR upscaler init OK: " + fsr.lastError() : L"FSR upscaler init FAILED: " + fsr.lastError());
     bool fsrEnabled = fsrOk;
     if (cliMode && hasConsole()) {
