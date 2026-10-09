@@ -26,9 +26,9 @@ static constexpr COLORREF C_CARD2    = RGB(30,30,33);     // #1E1E21
 static constexpr COLORREF C_HOVER    = RGB(63,63,70);      // #3F3F46
 static constexpr COLORREF C_INPUT    = RGB(38,38,44);      // #26262C
 static constexpr COLORREF C_GHOST    = RGB(42,42,46);      // #2A2A2E
-static constexpr COLORREF C_RED      = RGB(220,38,38);     // #DC2626
-static constexpr COLORREF C_RED_HOT   = RGB(239,68,68);     // #EF4444
-static constexpr COLORREF C_RED_TINT = RGB(58,44,47);      // #3A2C2F
+static constexpr COLORREF C_RED      = RGB(181,108,255);   // launcher purple #B56CFF
+static constexpr COLORREF C_RED_HOT   = RGB(201,149,255);   // lighter purple hover
+static constexpr COLORREF C_RED_TINT = RGB(57,45,69);      // muted purple panel
 static constexpr COLORREF C_GREEN    = RGB(34,197,94);     // #22C55E
 static constexpr COLORREF C_TEXT     = RGB(232,232,232);   // #E8E8E8
 static constexpr COLORREF C_DIM      = RGB(139,139,139);   // #8B8B8B
@@ -52,6 +52,7 @@ static bool g_fgActive = false;
 static float g_sharpness = 0.65f;
 static OverlayHudConfig g_cfg{};
 static std::wstring g_shotPath;
+static std::wstring g_saveStatus = L"Changes are saved automatically";
 static float g_lastFps = 0, g_lastMs = 0;
 static float g_smoothFps = 0, g_smoothMs = 0;
 static std::deque<float> g_frameSamples;
@@ -393,7 +394,7 @@ static void paintSettings(HWND h, HDC dc) {
   drawText(dc,L"Sharpening",24,304,13,C_TEXT,false);
   wchar_t sharp[16]{}; swprintf_s(sharp, L"%.2f", g_sharpness); drawText(dc,sharp,410,304,13,C_RED_HOT,false);
   drawText(dc,L"Cap FPS",142,378,13,C_TEXT,false);
-  drawText(dc,L"Folder",24,440,13,C_TEXT,false); drawText(dc,L"Saved to scaleconfig.ini",24,564,10,C_MUTED,false);
+  drawText(dc,L"Folder",24,440,13,C_TEXT,false); drawText(dc,g_saveStatus.c_str(),24,564,10,C_MUTED,false);
 }
 
 static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -469,6 +470,15 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       case 104: drawOwnerButton(dis, L"Resolution", g_cfg.resolution); return TRUE;
       case 105: drawOwnerButton(dis, L"Background", g_cfg.background); return TRUE;
       case 106: drawOwnerButton(dis, L"Enabled", g_frameLimit.enabled); return TRUE;
+      case 205: {
+        HDC dc = dis->hDC; RECT r = dis->rcItem;
+        HBRUSH bg = CreateSolidBrush(C_RED); FillRect(dc, &r, bg); DeleteObject(bg);
+        SetBkMode(dc, TRANSPARENT); SetTextColor(dc, C_DARK);
+        HFONT font = makeFont(12, true); HFONT prior = (HFONT)SelectObject(dc, font);
+        DrawTextW(dc, L"Save settings", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(dc, prior); DeleteObject(font);
+        return TRUE;
+      }
     }
   }
   // Theme native controls — dark backgrounds for statics, edits, buttons
@@ -506,6 +516,12 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return HTCLIENT;
   }
   if (m == WM_COMMAND) {
+    if (LOWORD(w) == 205 && HIWORD(w) == BN_CLICKED) {
+      saveCfg();
+      g_saveStatus = L"Saved to scaleconfig.ini";
+      InvalidateRect(h, nullptr, FALSE);
+      return 0;
+    }
     if (LOWORD(w) >= 101 && LOWORD(w) <= 106) {
       // These are BS_OWNERDRAW controls, so Windows does not maintain a
       // checkbox state for us. Toggle our actual config state directly.
@@ -639,6 +655,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     g_pathEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_shotPath.c_str(),
       WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 462, 340, 24, g_settings, (HMENU)203, inst, nullptr);
     CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 462, 80, 24, g_settings, (HMENU)204, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)205, inst, nullptr);
     CheckDlgButton(g_settings, 101, g_cfg.fps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 102, g_cfg.frametime ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 103, g_cfg.frame_timing ? BST_CHECKED : BST_UNCHECKED);
