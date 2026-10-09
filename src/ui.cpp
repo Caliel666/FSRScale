@@ -434,6 +434,14 @@ static void applyOverlayActivation(bool open)
   }
 }
 
+void releaseCursorClip()
+{
+  ClipCursor(nullptr);
+  if (g_output && GetCapture() == g_output) ReleaseCapture();
+  showRealCursor();
+  hideDrawnCursor();
+}
+
 void setOverlayOpen(bool open)
 {
   if (g_overlayOpen == open) {
