@@ -99,6 +99,17 @@ static bool stopHotkeyDown(UINT modifiers, UINT vk)
   return down((int)vk);
 }
 
+static bool targetOwnsForeground(HWND target)
+{
+  HWND foreground = GetForegroundWindow();
+  if (!foreground || !target) return false;
+  if (foreground == target) return true;
+  // Treat owned dialogs and child windows belonging to the captured top-level
+  // window as game focus, but not unrelated foreground applications.
+  return GetAncestor(foreground, GA_ROOTOWNER) == target ||
+         GetAncestor(foreground, GA_ROOT) == target;
+}
+
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 {
   // Keep HWND, WGC crop, and cursor coordinates in the same physical-pixel
@@ -227,6 +238,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     FrameLimiter frameLimiter;
     bool reset = true, running = true;
     bool stopLatched = false;
+    bool softUncaptured = false;
     float fps = 0;
     Size lastCs{};
     LARGE_INTEGER freq, lastCaptured, now;
@@ -273,6 +285,31 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (!target || !IsWindow(target)) {
         running = false;
         break;
+      }
+
+      // Overlay mode intentionally takes focus away from the game; never
+      // pause capture for that transition. Outside overlay mode, stop WGC
+      // while another application's window is foreground and recreate the
+      // capture session when the captured window regains focus.
+      const bool targetFocused = isOverlayOpen() || targetOwnsForeground(target);
+      if (!targetFocused) {
+        if (!softUncaptured) {
+          gfx.waitForGpu();
+          cap.stop();
+          softUncaptured = true;
+          reset = true;
+        }
+        Sleep(8);
+        continue;
+      }
+      if (softUncaptured) {
+        if (!cap.start(target)) {
+          Sleep(50);
+          continue;
+        }
+        softUncaptured = false;
+        reset = true;
+        QueryPerformanceCounter(&lastCaptured);
       }
 
       if (stopHotkeyDown(spec.stopHotkeyModifiers, spec.stopHotkeyVk)) {
