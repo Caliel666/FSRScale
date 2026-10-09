@@ -16,14 +16,14 @@
                         </Border>
                         <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="NRLive" FontSize="18" FontWeight="SemiBold"/>
-                            <TextBlock Text="WINDOW SCALER" FontSize="9" Foreground="{StaticResource MutedBrush}" CharacterSpacing="90"/>
+                            <TextBlock Text="WINDOW SCALER" FontSize="9" Foreground="{StaticResource MutedBrush}"/>
                         </StackPanel>
                     </StackPanel>
-                    <TextBlock Text="PROFILES" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,8" CharacterSpacing="120"/>
+                    <TextBlock Text="PROFILES" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,8"/>
                     <ComboBox x:Name="ProfileBox" SelectionChanged="ProfileBox_SelectionChanged" Margin="0,0,0,8"/>
                     <Button Content="Save profile" Click="SaveProfile_Click" HorizontalAlignment="Stretch"/>
                     <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,20,0,18"/>
-                    <TextBlock Text="QUICK START" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,10" CharacterSpacing="120"/>
+                    <TextBlock Text="QUICK START" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,10"/>
                     <TextBlock Text="1. Choose the target window." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,0,0,8"/>
                     <TextBlock Text="2. Press Scale and switch to your game during the countdown." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,0,0,8"/>
                     <TextBlock Text="3. Press Unscale or the toggle hotkey to stop." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="4,0,0,8"/>
@@ -31,7 +31,7 @@
                 <StackPanel DockPanel.Dock="Bottom" Margin="2,14,2,2">
                     <Border Background="#25282E" CornerRadius="10" Padding="11">
                         <StackPanel>
-                            <TextBlock Text="GLOBAL TOGGLE" FontSize="10" Foreground="{StaticResource MutedBrush}" CharacterSpacing="80"/>
+                            <TextBlock Text="GLOBAL TOGGLE" FontSize="10" Foreground="{StaticResource MutedBrush}"/>
                             <TextBlock x:Name="SidebarHotkey" Text="Ctrl + Alt + S" FontSize="14" FontWeight="SemiBold" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
@@ -54,7 +54,7 @@
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="SCALING SESSION" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold" CharacterSpacing="100"/>
+                                <TextBlock Text="SCALING SESSION" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold"/>
                                 <TextBlock Text="Ready when you are" FontSize="20" FontWeight="SemiBold" Margin="0,6,0,4"/>
                                 <TextBlock x:Name="StatusText" Text="Press Scale, then switch to the game before the countdown ends." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MaxWidth="470"/>
                             </StackPanel>
