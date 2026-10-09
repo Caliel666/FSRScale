@@ -12,7 +12,9 @@ if (!(Test-Path (Join-Path $sdkPath "Kits\FidelityFX\api\include\ffx_api.h"))) {
   git clone --depth 1 --branch v2.3.0 https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git $sdkPath
   if ($LASTEXITCODE -ne 0) { throw "Failed to clone FSR SDK 2.3.0." }
 }
-if (!(Test-Path (Join-Path $binPath "amd_fidelityfx_loader_dx12.dll"))) {
+if (!(Test-Path (Join-Path $binPath "amd_fidelityfx_loader_dx12.dll")) -or
+    !(Test-Path (Join-Path $binPath "amd_fidelityfx_framegeneration_dx12.dll")) -or
+    !(Test-Path (Join-Path $binPath "amd_fidelityfx_upscaler_dx12.dll"))) {
   if (Test-Path $binPath) { Remove-Item -LiteralPath $binPath -Recurse -Force }
   New-Item -ItemType Directory -Force -Path $binPath | Out-Null
   Write-Host "Fetching AMD FSR SDK 2.3.0 signed runtime providers..."
