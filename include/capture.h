@@ -30,6 +30,8 @@ public:
   bool start(HWND hwnd);
   // Polls the frame pool (Magpie _Update). True when a new frame was copied.
   bool acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue);
+  // Sleep until WGC reports a frame instead of busy-polling an empty frame pool.
+  void waitForFrame(DWORD timeoutMs = 1) const;
   ID3D12Fence* fence() const { return m_fence.Get(); }
   void release(uint64_t) {} // no-op; Magpie does not need this
   bool saveScreenshot(const std::wstring& folder, uint64_t frameIndex);
@@ -81,5 +83,6 @@ private:
   HWND m_hwnd = nullptr;
   std::wstring m_error;
   std::atomic<uint64_t> m_frameCount{ 0 };
+  HANDLE m_frameArrivedEvent = nullptr;
   bool m_started = false;
 };
