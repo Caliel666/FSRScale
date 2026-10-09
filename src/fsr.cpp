@@ -1,6 +1,6 @@
 #include "fsr.h"
 #include "graphics.h"
-#include <ffx_api/ffx_api_loader.h>
+#include <ffx_api_loader.h>
 #include <cfloat>
 #include <mutex>
 #include <string>
@@ -140,7 +140,11 @@ bool Fsr::init(ID3D12Device* device, Size maxRender, Size maxDisplay)
 
   ffxCreateContextDescUpscale up{};
   up.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
-  up.header.pNext = &backend.header;
+  ffxCreateContextDescUpscaleVersion upVersion{};
+  upVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION;
+  upVersion.version = FFX_UPSCALER_VERSION;
+  upVersion.header.pNext = &backend.header;
+  up.header.pNext = &upVersion.header;
   up.maxRenderSize = { maxRender.w, maxRender.h };
   up.maxUpscaleSize = { maxDisplay.w, maxDisplay.h };
   up.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE |
@@ -260,7 +264,11 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
   }
   ffxCreateContextDescFrameGenerationSwapChainWrapDX12 wrap{};
   wrap.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WRAP_DX12;
-  wrap.header.pNext = nullptr;
+  ffxCreateContextDescFrameGenerationSwapChainVersionDX12 wrapVersion{};
+  wrapVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_VERSION_DX12;
+  wrapVersion.version = FFX_FRAMEGENERATION_SWAPCHAIN_DX12_VERSION;
+  wrapVersion.header.pNext = nullptr;
+  wrap.header.pNext = &wrapVersion.header;
   wrap.swapchain = swapChain;
   wrap.gameQueue = queue;
   ffxReturnCode_t rc = g_ffx.CreateContext(&m_swapChainCtx, &wrap.header, nullptr);
@@ -280,7 +288,11 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
   backend.device = device;
   ffxCreateContextDescFrameGeneration fg{};
   fg.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
-  fg.header.pNext = &backend.header;
+  ffxCreateContextDescFrameGenerationVersion fgVersion{};
+  fgVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION;
+  fgVersion.version = FFX_FRAMEGENERATION_VERSION;
+  fgVersion.header.pNext = &backend.header;
+  fg.header.pNext = &fgVersion.header;
   fg.flags = FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED |
              FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE;
   fg.displaySize = { display.w, display.h };
@@ -432,16 +444,9 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
   m_callbackEnabled = false;
   m_pendingReset = enabled && reset;
   if (enabled) {
-    ffxDispatchDescFrameGenerationPrepareCameraInfo camera{};
-    camera.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_CAMERAINFO;
-    camera.header.pNext = nullptr;
-    camera.cameraPosition[0] = camera.cameraPosition[1] = camera.cameraPosition[2] = 0.0f;
-    camera.cameraUp[0] = 0.0f; camera.cameraUp[1] = 1.0f; camera.cameraUp[2] = 0.0f;
-    camera.cameraRight[0] = 1.0f; camera.cameraRight[1] = 0.0f; camera.cameraRight[2] = 0.0f;
-    camera.cameraForward[0] = 0.0f; camera.cameraForward[1] = 0.0f; camera.cameraForward[2] = 1.0f;
-    ffxDispatchDescFrameGenerationPrepare prep{};
-    prep.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE;
-    prep.header.pNext = &camera.header;
+    ffxDispatchDescFrameGenerationPrepareV2 prep{};
+    prep.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2;
+    prep.header.pNext = nullptr;
     prep.frameID = frameId;
     prep.flags = 0;
     prep.commandList = cmd;
@@ -449,7 +454,7 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
     prep.jitterOffset = { 0.0f, 0.0f };
     prep.motionVectorScale = { 1.0f, 1.0f };
     prep.frameTimeDelta = dt > 0.0f ? dt : (1000.0f / 60.0f);
-    prep.unused_reset = reset;
+    prep.reset = reset;
     prep.cameraNear = 0.01f;
     prep.cameraFar = 1000.0f;
     prep.cameraFovAngleVertical = 1.0f;
