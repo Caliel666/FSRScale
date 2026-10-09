@@ -92,6 +92,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           if (-not (Test-Path "build/Release/NRLive.exe")) { throw "NRLive.exe was not produced." }
+          if (-not (Test-Path "build/Release/NRLive-PreFSR.addon64")) { throw "NRLive-PreFSR.addon64 was not produced." }
           foreach ($dll in @(
             "amd_fidelityfx_loader_dx12.dll",
             "amd_fidelityfx_framegeneration_dx12.dll",
@@ -111,6 +112,7 @@ jobs:
           # The launcher resolves NRLive.exe and the FSR provider DLLs relative
           # to its own directory. Keep the entire runnable application flat.
           Copy-Item "build/Release/NRLive.exe" $package -Force
+          Copy-Item "build/Release/NRLive-PreFSR.addon64" $package -Force
           Copy-Item "build/Release/amd_fidelityfx_loader_dx12.dll" $package -Force
           Copy-Item "build/Release/amd_fidelityfx_framegeneration_dx12.dll" $package -Force
           Copy-Item "build/Release/amd_fidelityfx_upscaler_dx12.dll" $package -Force
@@ -118,6 +120,7 @@ jobs:
           foreach ($file in @(
             "NRLiveUI.exe",
             "NRLive.exe",
+            "NRLive-PreFSR.addon64",
             "amd_fidelityfx_loader_dx12.dll",
             "amd_fidelityfx_framegeneration_dx12.dll",
             "amd_fidelityfx_upscaler_dx12.dll"
