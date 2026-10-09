@@ -48,6 +48,7 @@ static bool g_initialized = false;
 static bool g_toggleFsr = false, g_screenshot = false, g_toggleFrameLimit = false, g_toggleFg = false;
 static OverlayFrameLimitConfig g_frameLimit{};
 static bool g_fgEnabled = false;
+static bool g_fgActive = false;
 static OverlayHudConfig g_cfg{};
 static std::wstring g_shotPath;
 static float g_lastFps = 0, g_lastMs = 0;
@@ -239,11 +240,19 @@ static void paintFpsContent(HDC dc, int w, int h) {
   if (g_cfg.fps) {
     wchar_t buf[64];
     drawText(dc, L"NRLive", pad, y, smFont, g_cfg.engine_color, g_cfg.text_outline);
-    swprintf_s(buf, L"%.1f", g_smoothFps);
     int labelW = (int)(smFont * 4.5);
-    drawText(dc, buf, pad+labelW, y, fs, g_cfg.text_color, g_cfg.text_outline);
-    int numW = buf[0] ? (int)(wcslen(buf)*(fs*0.6)) : 0;
-    drawText(dc, L"FPS", pad+labelW+numW+4, y+(fs-smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
+    int numW = 0;
+    if (g_fgActive) {
+      swprintf_s(buf, L"%.0f/%.0f", g_smoothFps * 2.0f, g_smoothFps);
+      drawText(dc, buf, pad+labelW, y, fs, g_cfg.text_color, g_cfg.text_outline);
+      numW = (int)(wcslen(buf)*(fs*0.6));
+      drawText(dc, L"FG", pad+labelW+numW+4, y+(fs-smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
+    } else {
+      swprintf_s(buf, L"%.1f", g_smoothFps);
+      drawText(dc, buf, pad+labelW, y, fs, g_cfg.text_color, g_cfg.text_outline);
+      numW = buf[0] ? (int)(wcslen(buf)*(fs*0.6)) : 0;
+      drawText(dc, L"FPS", pad+labelW+numW+4, y+(fs-smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
+    }
     if (g_cfg.frametime) {
       int ftX = pad+labelW+numW+(int)(smFont*4.5);
       swprintf_s(buf, L"%.1f", g_smoothMs);
@@ -701,6 +710,11 @@ void overlaySetFgEnabled(bool enabled) {
   g_fgEnabled = enabled;
   saveCfg();
   if (g_ui) InvalidateRect(g_ui, nullptr, FALSE);
+}
+void overlaySetFgActive(bool active) {
+  if (g_fgActive == active) return;
+  g_fgActive = active;
+  if (g_fpsVisible) renderFpsLayered();
 }
 const OverlayHudConfig& overlayConfig() { return g_cfg; }
 std::wstring overlayScreenshotPath() { return g_shotPath; }
