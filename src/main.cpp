@@ -385,6 +385,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (shouldPauseCapture && !capturePausedForFocus) {
         gfx.waitForGpu();
         cap.stop();
+        // Soft-unscale/focus loss must not leave the global cursor trapped in
+        // the fullscreen presentation bounds, and the detached HUD must hide.
+        releaseCursorClip();
+        overlaySetPresentationVisible(false);
         ShowWindow(out, SW_HIDE);
         capturePausedForFocus = true;
         continue;
@@ -400,6 +404,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         }
         setOutputFullscreen(out, mon);
         ShowWindow(out, SW_SHOWNOACTIVATE);
+        overlaySetPresentationVisible(true);
         capturePausedForFocus = false;
         reset = true;
         QueryPerformanceCounter(&lastCaptured);
