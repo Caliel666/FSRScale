@@ -17,6 +17,23 @@
 #include <chrono>
 #include <thread>
 #include <stdexcept>
+#include <fstream>
+
+static std::wstring logDirectory()
+{
+  wchar_t path[MAX_PATH]{};
+  GetModuleFileNameW(nullptr, path, MAX_PATH);
+  std::wstring dir(path);
+  const auto slash = dir.find_last_of(L"\\/");
+  if (slash != std::wstring::npos) dir.resize(slash + 1);
+  return dir;
+}
+
+static void logMain(const std::wstring& message)
+{
+  std::wofstream file(logDirectory() + L"NRLive.log", std::ios::out | std::ios::app);
+  if (file) file << message << L"\n";
+}
 
 static bool hasConsole() { return GetConsoleWindow() != nullptr; }
 
@@ -105,6 +122,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
   // space. DPI virtualization could make the cursor miss the source bounds,
   // disabling both clipping and the source-to-presentation coordinate map.
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  logMain(L"--- NRLive start ---");
+  logMain(L"command line: " + std::wstring(GetCommandLineW()));
 
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -181,11 +200,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
   try {
     Graphics gfx;
-    if (!gfx.init(out, render, display)) throw 1;
+    logMain(L"Graphics::init begin; render=" + std::to_wstring(render.w) + L"x" + std::to_wstring(render.h) + L"; display=" + std::to_wstring(display.w) + L"x" + std::to_wstring(display.h));
+    if (!gfx.init(out, render, display)) {
+      logMain(L"Graphics::init FAILED (D3D12 device, queue, swapchain, or presentation setup)");
+      throw 1;
+    }
+    logMain(L"Graphics::init OK");
 
     Capture cap;
     if (!cap.init(gfx.device(), gfx.queue()) || !cap.start(target)) {
       std::wstring msg = L"Capture failed: " + cap.lastError();
+      logMain(msg);
       if (cliMode && hasConsole()) printCli(msg);
       else MessageBoxW(nullptr, msg.c_str(), L"NRLive", MB_ICONERROR);
       if (hk) UnregisterHotKey(nullptr, kStopId);
@@ -199,6 +224,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
+    logMain(fsrOk ? L"FSR upscaler init OK: " + fsr.lastError() : L"FSR upscaler init FAILED: " + fsr.lastError());
     bool fsrEnabled = fsrOk;
     if (cliMode && hasConsole()) {
       if (fsrOk) printCli(L"FSR OK: " + fsr.lastError());
@@ -229,6 +255,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     FsrFrameGeneration fg;
     IDXGISwapChain4* fgSwapChain = gfx.swapChain();
     bool fgOk = fg.init(gfx.device(), render, display, &fgSwapChain, gfx.queue());
+    logMain(fgOk ? L"FSR frame generation init OK: " + fg.lastError() : L"FSR frame generation init FAILED: " + fg.lastError());
     if (fgOk && fgSwapChain != gfx.swapChain() && !gfx.adoptSwapChain(fgSwapChain)) {
       fg.shutdown();
       fgOk = false;
@@ -658,9 +685,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     cap.stop();
     if (hk) UnregisterHotKey(nullptr, kStopId);
   } catch (const std::exception& e) {
+    logMain(L"Fatal std::exception: " + std::wstring(e.what(), e.what() + strlen(e.what())));
     if (hk) UnregisterHotKey(nullptr, kStopId);
     MessageBoxA(nullptr, e.what(), "NRLive", MB_ICONERROR);
   } catch (...) {
+    logMain(L"Fatal unknown exception or graphics initialization failure");
     if (hk) UnregisterHotKey(nullptr, kStopId);
     MessageBoxW(nullptr, L"Fatal graphics error.", L"NRLive", MB_ICONERROR);
   }
