@@ -17,7 +17,6 @@ public:
                 ID3D12Resource* motionVectors,
                 ID3D12Resource* reactive,
                 ID3D12Resource* output,
-                void* swapChain,
                 Size render, Size display,
                 float dt, bool reset);
   void setQuality(int quality);
@@ -47,6 +46,7 @@ public:
                 ID3D12Resource* depth,
                 ID3D12Resource* motionVectors,
                 ID3D12Resource* output,
+                void* swapChain,
                 Size render, Size display,
                 float dt, bool reset);
   void shutdown();
