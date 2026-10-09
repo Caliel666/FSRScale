@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <stdexcept>
 #include <cstdio>
+#include <cstring>
+#include <vector>
 
 static void hr(HRESULT x)
 {
@@ -492,6 +494,25 @@ static bool writeScreenshotPng(const std::wstring& folder,
   ComPtr<IWICBitmapEncoder> enc;
   ComPtr<IWICBitmapFrameEncode> frame;
 
+  // The presentation backbuffer can contain undefined/zero alpha after FSR,
+  // even though the composed image is visibly opaque. Normalize to tightly
+  // packed RGBA and force alpha to 255 so dark pixels never become transparent
+  // in PNG viewers/editors. Copy row-by-row because D3D12 readback rows are
+  // padded to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT.
+  const UINT packedRowPitch = width * 4;
+  if (rowPitch < packedRowPitch) {
+    if (uninit) CoUninitialize();
+    return false;
+  }
+  std::vector<BYTE> opaquePixels((size_t)packedRowPitch * height);
+  for (UINT y = 0; y < height; ++y) {
+    BYTE* dst = opaquePixels.data() + (size_t)y * packedRowPitch;
+    const BYTE* src = pixels + (size_t)y * rowPitch;
+    std::memcpy(dst, src, packedRowPitch);
+    for (UINT x = 0; x < width; ++x)
+      dst[(size_t)x * 4 + 3] = 255;
+  }
+
   bool ok = false;
   do {
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
@@ -499,8 +520,8 @@ static bool writeScreenshotPng(const std::wstring& folder,
                                 IID_PPV_ARGS(&fac)))) break;
     if (FAILED(fac->CreateBitmapFromMemory(
           width, height, GUID_WICPixelFormat32bppRGBA,
-          rowPitch, rowPitch * height,
-          const_cast<BYTE*>(pixels), &bmp))) break;
+          packedRowPitch, (UINT)opaquePixels.size(),
+          opaquePixels.data(), &bmp))) break;
     if (FAILED(fac->CreateStream(&stream))) break;
     if (FAILED(stream->InitializeFromFilename(file.c_str(), GENERIC_WRITE))) break;
     if (FAILED(fac->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc))) break;

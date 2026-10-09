@@ -648,6 +648,21 @@ void overlayShutdown() {
   g_fps = g_ui = g_settings = nullptr; g_initialized = false;
 }
 
+void overlaySetPresentationVisible(bool visible) {
+  if (!g_fps || !IsWindow(g_fps)) return;
+  if (!visible) {
+    ShowWindow(g_fps, SW_HIDE);
+    return;
+  }
+  // Recompute from the current output rectangle and restore topmost ordering;
+  // never leave the HUD visible at the old desktop position during Alt-Tab.
+  updateFpsPos();
+  if (g_fpsVisible) {
+    SetWindowPos(g_fps, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  }
+}
+
 void overlaySetOpen(bool open) {
   g_open = open;
   if (g_ui) {

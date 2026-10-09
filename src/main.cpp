@@ -334,8 +334,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         overlaySetFgEnabled(fgEnabled);
         reset = true;
       }
-      drawCursor();
-
       // Camera requests are consumed only once a fresh capture frame is
       // available, then executed after the final FSR/blit pass below.
       bool screenshotRequested = false;
@@ -385,6 +383,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (shouldPauseCapture && !capturePausedForFocus) {
         gfx.waitForGpu();
         cap.stop();
+        // Soft-unscale/focus loss must not leave the global cursor trapped in
+        // the fullscreen presentation bounds, and the detached HUD must hide.
+        releaseCursorClip();
+        overlaySetPresentationVisible(false);
         ShowWindow(out, SW_HIDE);
         capturePausedForFocus = true;
         continue;
@@ -400,11 +402,18 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         }
         setOutputFullscreen(out, mon);
         ShowWindow(out, SW_SHOWNOACTIVATE);
+        overlaySetPresentationVisible(true);
         capturePausedForFocus = false;
         reset = true;
         QueryPerformanceCounter(&lastCaptured);
         continue; // let WGC deliver a fresh frame before rendering
       }
+
+      // Only transform/hide the system cursor while the scaled presentation
+      // is active. Calling drawCursor before focus-state handling re-applied
+      // ClipCursor and hid the real cursor on every soft-unscale polling loop,
+      // immediately undoing releaseCursorClip() and trapping the user in NRLive.
+      drawCursor();
 
       if (frameLimiter.enabled() && frameLimiter.method() == 0)
         frameLimiter.wait(); // early mode: pace before capture/CPU preparation

@@ -434,6 +434,14 @@ static void applyOverlayActivation(bool open)
   }
 }
 
+void releaseCursorClip()
+{
+  ClipCursor(nullptr);
+  if (g_output && GetCapture() == g_output) ReleaseCapture();
+  showRealCursor();
+  hideDrawnCursor();
+}
+
 void setOverlayOpen(bool open)
 {
   if (g_overlayOpen == open) {
@@ -578,8 +586,9 @@ HWND createOutput(HINSTANCE i, int w, int h)
   if (hwnd) {
     g_output = hwnd;
     createCursorWindow(i);
-    // WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Win10 2004+)
-    SetWindowDisplayAffinity(hwnd, 0x00000011);
+    // Keep the presentation window eligible for Windows Graphics Capture,
+    // Snipping Tool, Game Bar, and OBS. WDA_EXCLUDEFROMCAPTURE made the whole
+    // upscaled surface disappear from external capture tools.
   }
   return hwnd;
 }
