@@ -349,10 +349,8 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
                                  Size render, Size display,
                                  float dt, bool reset, bool enabled)
 {
-  if (failed()) {
-    m_error = L"FSR FG disabled after generation callback failure";
-    return false;
-  }
+  const bool priorFailure = failed();
+  if (priorFailure) enabled = false;
   if (!m_ctx || !m_swapChainCtx || !g_ffx.Configure || !g_ffx.Dispatch || !cmd) {
     m_error = L"FSR FG prepare skipped: runtime or swapchain unavailable";
     return false;
@@ -430,7 +428,8 @@ bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
     m_callbackEnabled = true;
   }
   ++m_frameId;
-  m_error = enabled ? L"FSR FG prepared for paced Present" : L"FSR FG disabled for this frame";
+  m_error = priorFailure ? L"FSR FG disabled after generation callback failure" :
+            (enabled ? L"FSR FG prepared for paced Present" : L"FSR FG disabled for this frame");
   return true;
 }
 
