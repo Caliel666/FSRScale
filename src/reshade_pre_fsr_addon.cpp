@@ -47,7 +47,8 @@ bool isPreFsrTarget(command_list *cmd, resource_view view)
   UINT bytes = sizeof(name);
   if (FAILED(nativeResource->GetPrivateData(WKPDID_D3DDebugObjectNameW, &bytes, name)))
     return false;
-  name[(std::min<size_t>(bytes / sizeof(wchar_t), std::size(name)) - 1)] = L'\0';
+  const size_t chars = std::min<size_t>(bytes / sizeof(wchar_t), std::size(name) - 1);
+  name[chars] = L'\0';
   return wcscmp(name, kPreFsrResourceName) == 0;
 }
 
