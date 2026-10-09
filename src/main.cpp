@@ -501,8 +501,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         bool motionReady = false;
         bool reactiveReady = false;
         if (spec.motionMode == TargetSpec::MotionMode::Fast) {
-          motionReady = fastmv.dispatch(cmd, color.Get(), mv, reactive, cs, reset,
-                                         fgEnabled && fgOk);
+          motionReady = fastmv.dispatch(cmd, color.Get(), mv, reactive, cs, reset);
           reactiveReady = motionReady;
         } else {
           amdof.dispatch(cmd, color.Get(), mv, cs, reset);
@@ -594,28 +593,18 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       bool fgPrepared = true;
       if (fgOk) {
         if (runFgThisFrame) {
-          ID3D12Resource* fgMv = mv;
-          if (spec.motionMode == TargetSpec::MotionMode::Fast) {
-            if (auto* smoothed = fastmv.frameGenerationMotionVectors())
-              fgMv = smoothed;
-          }
           D3D12_RESOURCE_BARRIER toRead[2]{};
-          ID3D12Resource* inputs[2] = { depth, fgMv };
-          const D3D12_RESOURCE_STATES before[2] = {
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            fgMv == mv ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-                        : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-          };
+          ID3D12Resource* inputs[2] = { depth, mv };
           for (int i = 0; i < 2; ++i) {
             toRead[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             toRead[i].Transition.pResource = inputs[i];
             toRead[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            toRead[i].Transition.StateBefore = before[i];
+            toRead[i].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
             toRead[i].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
                                               D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
           }
           cmd->ResourceBarrier(2, toRead);
-          fgPrepared = fg.prepare(cmd, depth, fgMv, cs, display, dt, resetThisFrame, true);
+          fgPrepared = fg.prepare(cmd, depth, mv, cs, display, dt, resetThisFrame, true);
           D3D12_RESOURCE_BARRIER toWrite[2]{};
           for (int i = 0; i < 2; ++i) {
             toWrite[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -623,9 +612,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
             toWrite[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             toWrite[i].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
                                                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-            toWrite[i].Transition.StateAfter =
-                (i == 1 && fgMv != mv) ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
-                                       : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            toWrite[i].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
           }
           cmd->ResourceBarrier(2, toWrite);
         } else {
@@ -639,6 +626,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
           setStatus(out, fg.lastError().c_str());
         }
       }
+
+      overlaySetFgActive(runFgThisFrame && fgPrepared && !fg.failed());
 
       const float clear[4] = { 0, 0, 0, 1 };
       cmd->ClearRenderTargetView(gfx.rtvHandle(), clear, 0, nullptr);
@@ -675,7 +664,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (frameLimiter.enabled() && frameLimiter.method() == 1)
         frameLimiter.wait(); // late mode: finish CPU command recording before pacing
       gfx.present();
-      overlaySetFgActive(runFgThisFrame && fgPrepared && !fg.failed());
       if (fgOk && fg.failed()) {
         fgEnabled = false;
         overlaySetFgEnabled(false);
