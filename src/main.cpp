@@ -282,10 +282,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       QueryPerformanceCounter(&acquireStart);
       if (!cap.acquire(color, cs, fenceVal)) {
         // No new WGC frame yet — do not re-submit with stale resource states.
-        // Sleep(1) on Windows can stall for 1-15ms and was a stutter source.
-        // Yield the thread cheaply instead: try another thread on the same
-        // core first, then a 0-time sleep that the scheduler can ignore.
-        if (!SwitchToThread()) SleepEx(0, TRUE);
+        // Wait for the FrameArrived event with a short timeout so stop/hotkey
+        // polling remains responsive, while avoiding a busy loop that steals
+        // CPU time from the game and graphics driver.
+        cap.waitForFrame(1);
         continue;
       }
       QueryPerformanceCounter(&acquireEnd);
