@@ -139,6 +139,9 @@ bool Capture::createOutputTexture(Size size)
 
 bool Capture::start(HWND hwnd)
 {
+  if (m_frameArrivedEvent) { CloseHandle(m_frameArrivedEvent); m_frameArrivedEvent = nullptr; }
+  m_frameArrivedEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  if (!m_frameArrivedEvent) { m_error = L"Failed to create WGC frame event"; return false; }
   m_frameCount = 0;
   m_fenceValue = 0;
   m_started = false;
@@ -159,10 +162,9 @@ bool Capture::start(HWND hwnd)
     }
     if (!createOutputTexture(m_size)) return false;
 
-    // Magpie: Create with 4 buffers, size = captured frame size (full window).
-    // Prefer CreateFreeThreaded so we don't need a DispatcherQueue controller.
-    // FrameArrived is intentionally EMPTY — only forces a wake; we poll on
-    // the render thread exactly like Magpie _Update().
+    // Keep the four-buffer WGC pool, but use FrameArrived to wake the render
+    // thread. The old empty callback plus SwitchToThread loop burned CPU while
+    // waiting for the next game frame, competing with the game and GPU driver.
     m_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
       m_winrtDevice,
       DirectXPixelFormat::B8G8R8A8UIntNormalized,
@@ -170,9 +172,9 @@ bool Capture::start(HWND hwnd)
       itemSize);
 
     m_arrived = m_pool.FrameArrived(winrt::auto_revoke,
-      [](auto&&, auto&&) {
-        // Magpie: callback does nothing. Presence of the subscription makes
-        // WGC keep delivering frames and posts a thread message.
+      [this](auto&&, auto&&) {
+        HANDLE event = m_frameArrivedEvent;
+        if (event) SetEvent(event);
       });
 
     m_session = m_pool.CreateCaptureSession(m_item);
@@ -251,6 +253,12 @@ void Capture::recomputeClientArea(HWND hwnd)
   const UINT clientW = (UINT)std::clamp((int)std::lround(cw * sx), 1, (int)maxW);
   const UINT clientH = (UINT)std::clamp((int)std::lround(ch * sy), 1, (int)maxH);
   m_size = { clientW, clientH };
+}
+
+void Capture::waitForFrame(DWORD timeoutMs) const
+{
+  if (m_frameArrivedEvent)
+    WaitForSingleObject(m_frameArrivedEvent, timeoutMs);
 }
 
 bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue)
@@ -378,6 +386,7 @@ void Capture::stop()
   if (m_sharedHandle) { CloseHandle(m_sharedHandle); m_sharedHandle = nullptr; }
   m_item = nullptr;
   m_hwnd = nullptr;
+  if (m_frameArrivedEvent) { CloseHandle(m_frameArrivedEvent); m_frameArrivedEvent = nullptr; }
   m_size = {};
   m_windowSize = {};
   m_clientOffsetX = 0;
