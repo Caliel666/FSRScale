@@ -210,7 +210,10 @@ bool Graphics::buildSwapChain(Size display)
   DXGI_SWAP_CHAIN_DESC1 s{};
   s.Width = display.w; s.Height = display.h;
   s.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-  s.BufferCount = 3;
+  // FSR's interpolation swapchain recommends two application backbuffers; it
+  // maintains its own real presentation swapchain internally. Three here adds
+  // latency and can make wrapping less compatible with providers.
+  s.BufferCount = 2;
   s.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
   s.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   s.SampleDesc.Count = 1;
