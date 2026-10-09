@@ -13,9 +13,14 @@ class Graphics {
 public:
   bool init(HWND output, Size render, Size display);
   bool resize(Size display);
+  // Release all app-owned references before AMD replaces the swapchain.
+  void releaseSwapChainForWrap();
+  bool rebuildSwapChain(Size display);
+  bool adoptSwapChain(IDXGISwapChain4* wrapped);
   bool begin();
   void end();
   ID3D12Device* device() const { return m_dev.Get(); }
+  IDXGISwapChain4* swapChain() const { return m_swap.Get(); }
   ID3D12CommandQueue* queue() const { return m_queue.Get(); }
   ID3D12GraphicsCommandList* cmd() const { return m_cmd.Get(); }
   ID3D12Resource* backbuffer() const { return m_back[m_index].Get(); }

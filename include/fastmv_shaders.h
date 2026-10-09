@@ -170,6 +170,8 @@ void main(uint3 id : SV_DispatchThreadID)
 }
 )";
 
+
+
 // Full-resolution resolve.  Each pixel considers zero motion, its block's
 // vector, and the three adjacent block vectors.  The best local 3x3 match
 // wins.  The same match error becomes a conservative reactive/distrust mask.

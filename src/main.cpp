@@ -17,6 +17,24 @@
 #include <chrono>
 #include <thread>
 #include <stdexcept>
+#include <fstream>
+#include <cstring>
+
+static std::wstring logDirectory()
+{
+  wchar_t path[MAX_PATH]{};
+  GetModuleFileNameW(nullptr, path, MAX_PATH);
+  std::wstring dir(path);
+  const auto slash = dir.find_last_of(L"\\/");
+  if (slash != std::wstring::npos) dir.resize(slash + 1);
+  return dir;
+}
+
+static void logMain(const std::wstring& message)
+{
+  std::wofstream file(logDirectory() + L"NRLive.log", std::ios::out | std::ios::app);
+  if (file) file << message << L"\n";
+}
 
 static bool hasConsole() { return GetConsoleWindow() != nullptr; }
 
@@ -105,6 +123,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
   // space. DPI virtualization could make the cursor miss the source bounds,
   // disabling both clipping and the source-to-presentation coordinate map.
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  logMain(L"--- NRLive start ---");
+  logMain(L"command line: " + std::wstring(GetCommandLineW()));
 
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -181,11 +201,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
   try {
     Graphics gfx;
-    if (!gfx.init(out, render, display)) throw 1;
+    logMain(L"Graphics::init begin; render=" + std::to_wstring(render.w) + L"x" + std::to_wstring(render.h) + L"; display=" + std::to_wstring(display.w) + L"x" + std::to_wstring(display.h));
+    if (!gfx.init(out, render, display)) {
+      logMain(L"Graphics::init FAILED (D3D12 device, queue, swapchain, or presentation setup)");
+      throw 1;
+    }
+    logMain(L"Graphics::init OK");
 
     Capture cap;
     if (!cap.init(gfx.device(), gfx.queue()) || !cap.start(target)) {
       std::wstring msg = L"Capture failed: " + cap.lastError();
+      logMain(msg);
       if (cliMode && hasConsole()) printCli(msg);
       else MessageBoxW(nullptr, msg.c_str(), L"NRLive", MB_ICONERROR);
       if (hk) UnregisterHotKey(nullptr, kStopId);
@@ -199,6 +225,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
+    logMain(fsrOk ? L"FSR upscaler init OK: " + fsr.lastError() : L"FSR upscaler init FAILED: " + fsr.lastError());
     bool fsrEnabled = fsrOk;
     if (cliMode && hasConsole()) {
       if (fsrOk) printCli(L"FSR OK: " + fsr.lastError());
@@ -223,6 +250,37 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     setOverlayHud(nullptr);
     setOverlayOpen(false);
     setStatus(out, label.c_str());
+
+    // Create the actual AMD FSR Frame Generation context. The overlay toggle
+    // remains off unless the provider initializes successfully.
+    FsrFrameGeneration fg;
+    // Give the wrapper one owned reference, then drop every reference held by
+    // Graphics before AMD destroys/recreates the swapchain. Keeping m_back[] or
+    // m_swap1 alive here makes the SDK's swapchain replacement fail at runtime.
+    IDXGISwapChain4* fgSwapChain = gfx.swapChain();
+    if (fgSwapChain) fgSwapChain->AddRef();
+    gfx.releaseSwapChainForWrap();
+    bool fgOk = fg.init(gfx.device(), render, display, &fgSwapChain, gfx.queue());
+    logMain(fgOk ? L"FSR frame generation init OK: " + fg.lastError() : L"FSR frame generation init FAILED: " + fg.lastError());
+    if (fgOk && !gfx.adoptSwapChain(fgSwapChain)) {
+      fg.shutdown();
+      fgOk = false;
+      logMain(L"FSR FG wrapped swapchain adoption failed; rebuilding ordinary swapchain");
+    }
+    if (!fgOk) {
+      // Failed wrap/context creation may have consumed or invalidated the
+      // original DXGI swapchain pointer. Recreate a clean ordinary swapchain
+      // so capture/upscaling remain usable without frame generation.
+      if (!gfx.rebuildSwapChain(display))
+        throw std::runtime_error("could not rebuild DXGI swapchain after FSR FG initialization failed");
+      logMain(L"Ordinary swapchain rebuilt after FSR FG failure");
+    }
+    bool fgEnabled = fgOk && overlayFgEnabled();
+    overlaySetFgEnabled(fgEnabled);
+    Size fgMaxRender = render;
+    if (cliMode && hasConsole()) {
+      printCli(fgOk ? fg.lastError() : L"FSR FG unavailable: " + fg.lastError());
+    }
 
     FrameLimiter frameLimiter;
     bool reset = true, running = true;
@@ -266,7 +324,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       overlayConsumeFrameLimitToggle();
       const auto limitCfg = overlayFrameLimitConfig();
       frameLimiter.configure(limitCfg.enabled, limitCfg.fps, limitCfg.method);
-      if (overlayConsumeFsrToggle() && fsrOk) { fsrEnabled = !fsrEnabled; overlaySetFsrEnabled(fsrEnabled); }
+      if (overlayConsumeFsrToggle() && fsrOk) {
+        fsrEnabled = !fsrEnabled;
+        overlaySetFsrEnabled(fsrEnabled);
+        reset = true;
+      }
+      if (overlayConsumeFgToggle()) {
+        fgEnabled = fgOk && overlayFgEnabled();
+        overlaySetFgEnabled(fgEnabled);
+        reset = true;
+      }
       drawCursor();
 
       // Camera requests are consumed only once a fresh capture frame is
@@ -367,6 +434,22 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       lastCs = cs;
       setScaleSizes(cs, display);
       if (!gfx.ensureAuxTextures(cs)) throw std::runtime_error("auxiliary graphics textures could not be resized");
+      if (fgOk && (cs.w > fgMaxRender.w || cs.h > fgMaxRender.h)) {
+        gfx.waitForGpu();
+        const bool resizedFg = fg.resize(cs, display);
+        fgMaxRender = cs;
+        if (!resizedFg) {
+          // Keep the wrapper alive and configure it off on the next frame;
+          // don't leave a stale generation callback registered.
+          fgEnabled = false;
+          overlaySetFgEnabled(false);
+          setStatus(out, fg.lastError().c_str());
+        } else {
+          fgEnabled = overlayFgEnabled();
+          overlaySetFgEnabled(fgEnabled);
+        }
+        reset = true;
+      }
       QueryPerformanceCounter(&renderStart);
 
       // Keep a Camera click pending until a frame is available. The actual
@@ -386,6 +469,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       ID3D12Resource* presentSrc = color.Get();
       bool usedFsr = false;
+      const bool resetThisFrame = reset;
 
       if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
@@ -503,6 +587,48 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         cmd->ResourceBarrier(n, b);
       }
 
+      // The FFX frame-interpolation swapchain owns generation and pacing.
+      // Configure every output frame, but only prepare when FSR inputs are valid.
+      const bool runFgThisFrame = fgEnabled && fgOk && usedFsr && depth && mv;
+      bool fgPrepared = true;
+      if (fgOk) {
+        if (runFgThisFrame) {
+          D3D12_RESOURCE_BARRIER toRead[2]{};
+          ID3D12Resource* inputs[2] = { depth, mv };
+          for (int i = 0; i < 2; ++i) {
+            toRead[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            toRead[i].Transition.pResource = inputs[i];
+            toRead[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            toRead[i].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            toRead[i].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                              D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+          }
+          cmd->ResourceBarrier(2, toRead);
+          fgPrepared = fg.prepare(cmd, depth, mv, cs, display, dt, resetThisFrame, true);
+          D3D12_RESOURCE_BARRIER toWrite[2]{};
+          for (int i = 0; i < 2; ++i) {
+            toWrite[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            toWrite[i].Transition.pResource = inputs[i];
+            toWrite[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            toWrite[i].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            toWrite[i].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+          }
+          cmd->ResourceBarrier(2, toWrite);
+        } else {
+          fgPrepared = fg.prepare(cmd, nullptr, nullptr, cs, display, dt, resetThisFrame, false);
+        }
+        if (!fgPrepared && runFgThisFrame) {
+          fgEnabled = false;
+          overlaySetFgEnabled(false);
+          if (cliMode && hasConsole())
+            printCli(L"FSR FG disabled after prepare failure: " + fg.lastError());
+          setStatus(out, fg.lastError().c_str());
+        }
+      }
+
+      overlaySetFgActive(runFgThisFrame && fgPrepared && !fg.failed());
+
       const float clear[4] = { 0, 0, 0, 1 };
       cmd->ClearRenderTargetView(gfx.rtvHandle(), clear, 0, nullptr);
       gfx.blitToBackbuffer(presentSrc);
@@ -538,6 +664,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (frameLimiter.enabled() && frameLimiter.method() == 1)
         frameLimiter.wait(); // late mode: finish CPU command recording before pacing
       gfx.present();
+      if (fgOk && fg.failed()) {
+        fgEnabled = false;
+        overlaySetFgEnabled(false);
+        if (cliMode && hasConsole())
+          printCli(L"FSR FG disabled after generation failure: " + fg.lastError());
+        setStatus(out, fg.lastError().c_str());
+      }
       QueryPerformanceCounter(&renderEnd);
       const double acquireMs = (acquireEnd.QuadPart - acquireStart.QuadPart) * 1000.0 / double(freq.QuadPart);
       const double renderCpuMs = (renderEnd.QuadPart - renderStart.QuadPart) * 1000.0 / double(freq.QuadPart);
@@ -563,14 +696,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     fastmv.shutdown();
     amdof.shutdown();
+    fg.shutdown();
     fsr.shutdown();
     overlayShutdown();
     cap.stop();
     if (hk) UnregisterHotKey(nullptr, kStopId);
   } catch (const std::exception& e) {
+    logMain(L"Fatal std::exception: " + std::wstring(e.what(), e.what() + strlen(e.what())));
     if (hk) UnregisterHotKey(nullptr, kStopId);
     MessageBoxA(nullptr, e.what(), "NRLive", MB_ICONERROR);
   } catch (...) {
+    logMain(L"Fatal unknown exception or graphics initialization failure");
     if (hk) UnregisterHotKey(nullptr, kStopId);
     MessageBoxW(nullptr, L"Fatal graphics error.", L"NRLive", MB_ICONERROR);
   }

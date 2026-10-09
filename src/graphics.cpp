@@ -4,8 +4,16 @@
 #include <shlobj.h>
 #include <filesystem>
 #include <stdexcept>
+#include <cstdio>
 
-static void hr(HRESULT x) { if (FAILED(x)) throw std::runtime_error("D3D12 failure"); }
+static void hr(HRESULT x)
+{
+  if (FAILED(x)) {
+    char message[64]{};
+    sprintf_s(message, "D3D12 failure HRESULT=0x%08lX", static_cast<unsigned long>(x));
+    throw std::runtime_error(message);
+  }
+}
 
 // Fullscreen triangle, sample texture, write to RTV. Handles any src size.
 static const char* kBlitHlsl = R"(
@@ -210,7 +218,10 @@ bool Graphics::buildSwapChain(Size display)
   DXGI_SWAP_CHAIN_DESC1 s{};
   s.Width = display.w; s.Height = display.h;
   s.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-  s.BufferCount = 3;
+  // FSR's interpolation swapchain recommends two application backbuffers; it
+  // maintains its own real presentation swapchain internally. Three here adds
+  // latency and can make wrapping less compatible with providers.
+  s.BufferCount = 2;
   s.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
   s.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   s.SampleDesc.Count = 1;
@@ -232,7 +243,7 @@ bool Graphics::buildSwapChain(Size display)
   m_rtvStride = m_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
   m_rtvBase = m_rtv->GetCPUDescriptorHandleForHeapStart();
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) {
     m_back[i].Reset();
     hr(m_swap->GetBuffer(i, IID_PPV_ARGS(&m_back[i])));
     auto h = m_rtvBase; h.ptr += (SIZE_T)i * m_rtvStride;
@@ -255,6 +266,44 @@ bool Graphics::buildSwapChain(Size display)
     ohp.CreationNodeMask = 1; ohp.VisibleNodeMask = 1;
     hr(m_dev->CreateCommittedResource(&ohp, D3D12_HEAP_FLAG_NONE, &od,
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&m_upscaleOutput)));
+  }
+  return true;
+}
+
+void Graphics::releaseSwapChainForWrap()
+{
+  // AMD's frame-interpolation wrapper releases the original swapchain and
+  // recreates it for the same HWND. DXGI requires every backbuffer reference
+  // and every app-owned swapchain interface to be released first.
+  for (auto& b : m_back) b.Reset();
+  m_swap1.Reset();
+  m_swap.Reset();
+  m_index = 0;
+  m_lastBlitSrc = nullptr;
+  m_lastBlitFmt = DXGI_FORMAT_UNKNOWN;
+}
+
+bool Graphics::rebuildSwapChain(Size display)
+{
+  releaseSwapChainForWrap();
+  return buildSwapChain(display);
+}
+
+bool Graphics::adoptSwapChain(IDXGISwapChain4* wrapped)
+{
+  if (!wrapped || !m_rtv || !m_dev) return false;
+  for (auto& b : m_back) b.Reset();
+  m_swap1.Reset();
+  m_swap.Reset();
+  m_swap = wrapped;
+  if (FAILED(m_swap.As(&m_swap1))) return false;
+  m_index = m_swap->GetCurrentBackBufferIndex();
+  for (UINT i = 0; i < 2; ++i) {
+    if (FAILED(m_swap->GetBuffer(i, IID_PPV_ARGS(&m_back[i]))))
+      return false;
+    auto h = m_rtvBase;
+    h.ptr += (SIZE_T)i * m_rtvStride;
+    m_dev->CreateRenderTargetView(m_back[i].Get(), nullptr, h);
   }
   return true;
 }
@@ -484,7 +533,7 @@ bool Graphics::present()
 
   // A screenshot is synchronized only on the frame that requested it.
   // This guarantees the PNG contains the post-FSR backbuffer while normal
-  // frames retain the existing 3-buffered, non-blocking path.
+  // frames retain the existing buffered, non-blocking path.
   if (m_screenshotPending) {
     if (m_fence->GetCompletedValue() < v) {
       m_fence->SetEventOnCompletion(v, m_fenceEvent);
@@ -510,7 +559,7 @@ bool Graphics::present()
     m_screenshotFrame = 0;
   }
 
-  const UINT bufCount = 3; // match swap chain BufferCount
+  const UINT bufCount = 2; // match swap chain BufferCount
   if (m_fenceValue >= bufCount) {
     const uint64_t waitFor = m_fenceValue - (bufCount - 1);
     if (m_fence->GetCompletedValue() < waitFor) {

@@ -44,5 +44,9 @@ bool overlayConsumeFsrToggle();             // returns true once when FSR button
 bool overlayConsumeScreenshot();            // returns true once when Camera button clicked
 bool overlayConsumeFrameLimitToggle();       // returns true once when the CAP button is clicked
 OverlayFrameLimitConfig overlayFrameLimitConfig();
+bool overlayConsumeFgToggle();                // returns true once when the FG button is clicked
+bool overlayFgEnabled();
+void overlaySetFgEnabled(bool enabled);
+void overlaySetFgActive(bool active);
 const OverlayHudConfig& overlayConfig();
 std::wstring overlayScreenshotPath();

@@ -50,8 +50,9 @@ bool Capture::init(ID3D12Device* d12, ID3D12CommandQueue* q)
 
   // Pure D3D11 device on the same adapter as D3D12 (Magpie style).
   ComPtr<IDXGIFactory6> factory;
-  if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)))) {
-    m_error = L"DXGI factory failed"; return false;
+  HRESULT factoryHr = CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
+  if (FAILED(factoryHr)) {
+    m_error = L"CreateDXGIFactory2 0x" + hex(factoryHr); return false;
   }
   LUID luid = m_d12->GetAdapterLuid();
   ComPtr<IDXGIAdapter1> adapter;
@@ -83,11 +84,13 @@ bool Capture::init(ID3D12Device* d12, ID3D12CommandQueue* q)
   try { m_winrtDevice = makeWinrtDevice(m_d11.Get()); }
   catch (...) { m_error = L"WinRT D3D device failed"; return false; }
 
-  if (FAILED(m_d12->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&m_fence)))) {
-    m_error = L"Fence create failed"; return false;
+  HRESULT fenceHr = m_d12->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&m_fence));
+  if (FAILED(fenceHr)) {
+    m_error = L"D3D12 CreateFence 0x" + hex(fenceHr); return false;
   }
-  if (FAILED(m_d12->CreateSharedHandle(m_fence.Get(), nullptr, GENERIC_ALL, nullptr, &m_fenceHandle))) {
-    m_error = L"Fence share failed"; return false;
+  HRESULT fenceShareHr = m_d12->CreateSharedHandle(m_fence.Get(), nullptr, GENERIC_ALL, nullptr, &m_fenceHandle);
+  if (FAILED(fenceShareHr)) {
+    m_error = L"D3D12 CreateSharedHandle(fence) 0x" + hex(fenceShareHr); return false;
   }
   if (m_d11_5) {
     // Some drivers expose ID3D11Device5 but reject opening a D3D12-created
@@ -130,15 +133,18 @@ bool Capture::createOutputTexture(Size size)
   if (FAILED(h)) { m_error = L"D3D11 out tex 0x" + hex(h); return false; }
 
   ComPtr<IDXGIResource1> res1;
-  if (FAILED(m_outD11.As(&res1))) { m_error = L"IDXGIResource1 missing"; return false; }
-  if (FAILED(res1->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
-                                      nullptr, &m_sharedHandle))) {
-    m_error = L"CreateSharedHandle failed"; return false;
+  HRESULT resHr = m_outD11.As(&res1);
+  if (FAILED(resHr)) { m_error = L"IDXGIResource1 query 0x" + hex(resHr); return false; }
+  HRESULT sharedHr = res1->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+                                      nullptr, &m_sharedHandle);
+  if (FAILED(sharedHr)) {
+    m_error = L"IDXGIResource1 CreateSharedHandle 0x" + hex(sharedHr); return false;
   }
 
   // Open on D3D12
-  if (FAILED(m_d12->OpenSharedHandle(m_sharedHandle, IID_PPV_ARGS(&m_outD12)))) {
-    m_error = L"D3D12 OpenSharedHandle failed"; return false;
+  HRESULT openHr = m_d12->OpenSharedHandle(m_sharedHandle, IID_PPV_ARGS(&m_outD12));
+  if (FAILED(openHr)) {
+    m_error = L"D3D12 OpenSharedHandle 0x" + hex(openHr); return false;
   }
   return true;
 }

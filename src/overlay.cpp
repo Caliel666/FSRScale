@@ -45,8 +45,10 @@ static HWND g_settings = nullptr, g_pathEdit = nullptr;
 static HINSTANCE g_inst = nullptr;
 static bool g_open = false, g_fsr = true, g_fpsVisible = true;
 static bool g_initialized = false;
-static bool g_toggleFsr = false, g_screenshot = false, g_toggleFrameLimit = false;
+static bool g_toggleFsr = false, g_screenshot = false, g_toggleFrameLimit = false, g_toggleFg = false;
 static OverlayFrameLimitConfig g_frameLimit{};
+static bool g_fgEnabled = false;
+static bool g_fgActive = false;
 static OverlayHudConfig g_cfg{};
 static std::wstring g_shotPath;
 static float g_lastFps = 0, g_lastMs = 0;
@@ -73,6 +75,7 @@ static void loadCfg() {
   g_frameLimit.enabled = GetPrivateProfileIntW(L"FrameLimiter", L"enabled", 0, ini.c_str()) != 0;
   g_frameLimit.fps = frame_limit::clampFps(GetPrivateProfileIntW(L"FrameLimiter", L"fps", 60, ini.c_str()));
   g_frameLimit.method = frame_limit::normalizeMethod(GetPrivateProfileIntW(L"FrameLimiter", L"method", 0, ini.c_str()));
+  g_fgEnabled = GetPrivateProfileIntW(L"FrameGeneration", L"enabled", 0, ini.c_str()) != 0;
   g_cfg.fps = GetPrivateProfileIntW(L"FPS", L"fps", 1, ini.c_str()) != 0;
   g_cfg.frametime = GetPrivateProfileIntW(L"FPS", L"frametime", 1, ini.c_str()) != 0;
   g_cfg.frame_timing = GetPrivateProfileIntW(L"FPS", L"frame_timing", 1, ini.c_str()) != 0;
@@ -108,6 +111,7 @@ static void saveCfg() {
   wchar_t limitValue[32]{};
   swprintf_s(limitValue, L"%d", g_frameLimit.fps); WritePrivateProfileStringW(L"FrameLimiter", L"fps", limitValue, ini.c_str());
   swprintf_s(limitValue, L"%d", g_frameLimit.method); WritePrivateProfileStringW(L"FrameLimiter", L"method", limitValue, ini.c_str());
+  WritePrivateProfileStringW(L"FrameGeneration", L"enabled", g_fgEnabled ? L"1" : L"0", ini.c_str());
 }
 
 // ── GDI helpers ───────────────────────────────────────────────────────────
@@ -170,6 +174,7 @@ static void drawBtnIcon(HDC dc, RECT r, int kind, bool active) {
     LineTo(dc, cx+6, cy-8);
     SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(p);
   } else if (kind == 3) { RECT tr{cx-24, cy-8, cx+24, cy+8}; DrawTextW(dc, L"CAP", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+  } else if (kind == 4) { RECT tr{cx-22, cy-8, cx+22, cy+8}; DrawTextW(dc, L"FG", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
   } else { // Settings gear
     HPEN p = CreatePen(PS_SOLID, 2, c);
     auto op = (HPEN)SelectObject(dc, p);
@@ -195,9 +200,9 @@ static void paintTopBar(HWND h, HDC dc) {
   RECT rc{}; GetClientRect(h, &rc);
   HBRUSH bg = CreateSolidBrush(C_WIN);
   FillRect(dc, &rc, bg); DeleteObject(bg);
-  for (int i = 0; i < 5; ++i) {
+  for (int i = 0; i < 6; ++i) {
     RECT b = btnRect(i);
-    bool active = (i==0&&g_fsr) || (i==1&&g_fpsVisible) || (i==3&&g_frameLimit.enabled) || (i==4&&IsWindowVisible(g_settings));
+    bool active = (i==0&&g_fsr) || (i==1&&g_fpsVisible) || (i==3&&g_frameLimit.enabled) || (i==4&&g_fgEnabled) || (i==5&&IsWindowVisible(g_settings));
     bool hot = (g_hoverBtn == i);
     HBRUSH br = CreateSolidBrush(active ? C_RED_TINT : (hot ? C_HOVER : C_GHOST));
     roundRect(dc, b, 6, br); DeleteObject(br);
@@ -235,11 +240,19 @@ static void paintFpsContent(HDC dc, int w, int h) {
   if (g_cfg.fps) {
     wchar_t buf[64];
     drawText(dc, L"NRLive", pad, y, smFont, g_cfg.engine_color, g_cfg.text_outline);
-    swprintf_s(buf, L"%.1f", g_smoothFps);
     int labelW = (int)(smFont * 4.5);
-    drawText(dc, buf, pad+labelW, y, fs, g_cfg.text_color, g_cfg.text_outline);
-    int numW = buf[0] ? (int)(wcslen(buf)*(fs*0.6)) : 0;
-    drawText(dc, L"FPS", pad+labelW+numW+4, y+(fs-smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
+    int numW = 0;
+    if (g_fgActive) {
+      swprintf_s(buf, L"%.0f/%.0f", g_smoothFps * 2.0f, g_smoothFps);
+      drawText(dc, buf, pad+labelW, y, fs, g_cfg.text_color, g_cfg.text_outline);
+      numW = (int)(wcslen(buf)*(fs*0.6));
+      drawText(dc, L"FG", pad+labelW+numW+4, y+(fs-smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
+    } else {
+      swprintf_s(buf, L"%.1f", g_smoothFps);
+      drawText(dc, buf, pad+labelW, y, fs, g_cfg.text_color, g_cfg.text_outline);
+      numW = buf[0] ? (int)(wcslen(buf)*(fs*0.6)) : 0;
+      drawText(dc, L"FPS", pad+labelW+numW+4, y+(fs-smFont), smFont, g_cfg.text_color, g_cfg.text_outline);
+    }
     if (g_cfg.frametime) {
       int ftX = pad+labelW+numW+(int)(smFont*4.5);
       swprintf_s(buf, L"%.1f", g_smoothMs);
@@ -385,13 +398,14 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   case WM_LBUTTONUP: {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
       RECT b = btnRect(i);
       if (PtInRect(&b, p)) {
         if (i == 0) { g_fsr = !g_fsr; g_toggleFsr = true; }
         else if (i == 1) { g_fpsVisible = !g_fpsVisible; saveCfg(); updateFpsPos(); }
         else if (i == 2) { g_screenshot = true; }
         else if (i == 3) { g_frameLimit.enabled = !g_frameLimit.enabled; g_toggleFrameLimit = true; saveCfg(); }
+        else if (i == 4) { g_fgEnabled = !g_fgEnabled; g_toggleFg = true; saveCfg(); }
         else { if (IsWindowVisible(g_settings)) ShowWindow(g_settings, SW_HIDE);
           else { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
             wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
@@ -406,7 +420,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_MOUSEMOVE: {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     int old = g_hoverBtn; g_hoverBtn = -1;
-    for (int i = 0; i < 5; ++i) { RECT b = btnRect(i); if (PtInRect(&b, p)) { g_hoverBtn = i; break; } }
+    for (int i = 0; i < 6; ++i) { RECT b = btnRect(i); if (PtInRect(&b, p)) { g_hoverBtn = i; break; } }
     if (g_hoverBtn != old) {
       InvalidateRect(h, nullptr, FALSE);
       TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, h, 0 };
@@ -558,7 +572,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   c.lpfnWndProc = fpsProc;     c.lpszClassName = FPS_CLS; RegisterClassExW(&c);
   c.lpfnWndProc = settingsProc; c.lpszClassName = SET_CLS; RegisterClassExW(&c);
 
-  int barW = BAR_PAD*2 + 5*BTN_SIZE + 4*BTN_GAP;
+  int barW = BAR_PAD*2 + 6*BTN_SIZE + 5*BTN_GAP;
   g_ui = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, UI_CLS, L"",
     WS_POPUP, 0, 0, barW, BAR_PAD*2+BTN_SIZE, nullptr, nullptr, inst, nullptr);
 
@@ -640,7 +654,7 @@ void overlaySetOpen(bool open) {
     if (open) {
       ShowWindow(g_ui, SW_SHOWNOACTIVATE);
       RECT o{}; if (GetWindowRect(g_output, &o)) {
-        int barW = BAR_PAD*2 + 5*BTN_SIZE + 4*BTN_GAP;
+        int barW = BAR_PAD*2 + 6*BTN_SIZE + 5*BTN_GAP;
         int cx = o.left + (o.right - o.left - barW) / 2;
         SetWindowPos(g_ui, HWND_TOPMOST, cx, o.top+16, barW, BAR_PAD*2+BTN_SIZE, SWP_NOACTIVATE|SWP_SHOWWINDOW);
       }
@@ -690,5 +704,17 @@ bool overlayConsumeFsrToggle() { bool v = g_toggleFsr; g_toggleFsr = false; retu
 bool overlayConsumeScreenshot() { bool v = g_screenshot; g_screenshot = false; return v; }
 bool overlayConsumeFrameLimitToggle() { bool v = g_toggleFrameLimit; g_toggleFrameLimit = false; return v; }
 OverlayFrameLimitConfig overlayFrameLimitConfig() { return g_frameLimit; }
+bool overlayConsumeFgToggle() { bool v = g_toggleFg; g_toggleFg = false; return v; }
+bool overlayFgEnabled() { return g_fgEnabled; }
+void overlaySetFgEnabled(bool enabled) {
+  g_fgEnabled = enabled;
+  saveCfg();
+  if (g_ui) InvalidateRect(g_ui, nullptr, FALSE);
+}
+void overlaySetFgActive(bool active) {
+  if (g_fgActive == active) return;
+  g_fgActive = active;
+  if (g_fpsVisible) renderFpsLayered();
+}
 const OverlayHudConfig& overlayConfig() { return g_cfg; }
 std::wstring overlayScreenshotPath() { return g_shotPath; }

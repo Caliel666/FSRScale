@@ -9,46 +9,66 @@ on:
 
 jobs:
   build:
-    name: Build + tests (FSR SDK 1.1.4)
+    name: Build + tests (FSR SDK 2.3.0)
     runs-on: windows-2022
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download AMD FidelityFX SDK 1.1.4
+      - name: Download AMD FSR SDK 2.3.0 headers and signed providers
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $url = "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/download/v1.1.4/FidelityFX-SDK-v1.1.4.zip"
-          $zip = Join-Path $env:RUNNER_TEMP "FidelityFX-SDK-v1.1.4.zip"
-          $root = Join-Path $env:RUNNER_TEMP "ffx-sdk"
-          New-Item -ItemType Directory -Force $root | Out-Null
+          $sourceUrl = "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/archive/refs/tags/v2.3.0.zip"
+          $runtimeUrl = "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/download/v2.3.0/FidelityFX-Samples-v2.3.0-prebuilt.zip"
+          $sourceZip = Join-Path $env:RUNNER_TEMP "fsr-sdk-source.zip"
+          $runtimeZip = Join-Path $env:RUNNER_TEMP "fsr-sdk-runtime.zip"
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "fsr-sdk-source"
+          $runtimeRoot = Join-Path $env:RUNNER_TEMP "fsr-sdk-runtime"
+          $binRoot = Join-Path $env:RUNNER_TEMP "fsr-sdk-bin"
+          New-Item -ItemType Directory -Force $sourceRoot, $runtimeRoot, $binRoot | Out-Null
 
-          curl.exe -L --fail --retry 5 --retry-delay 3 --output $zip $url
-          7z x $zip "-o$root" -y | Out-Host
+          curl.exe -L --fail --retry 5 --retry-delay 3 --output $sourceZip $sourceUrl
+          curl.exe -L --fail --retry 5 --retry-delay 3 --output $runtimeZip $runtimeUrl
+          Expand-Archive -LiteralPath $sourceZip -DestinationPath $sourceRoot -Force
+          Expand-Archive -LiteralPath $runtimeZip -DestinationPath $runtimeRoot -Force
 
-          $sdk = Get-ChildItem -Path $root -Directory | Where-Object { $_.Name -like "FidelityFX-SDK*" } | Select-Object -First 1
-          if (-not $sdk) { $sdk = Get-Item $root }
+          $sdk = Get-ChildItem -Path $sourceRoot -Directory | Select-Object -First 1
+          if (-not $sdk) { throw "FSR SDK source archive did not extract." }
+          foreach ($relative in @(
+            "Kits/FidelityFX/api/include/ffx_api.h",
+            "Kits/FidelityFX/framegeneration/include/ffx_framegeneration.h",
+            "Kits/FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h",
+            "Kits/FidelityFX/upscalers/include/ffx_upscale.h"
+          )) {
+            if (-not (Test-Path (Join-Path $sdk.FullName $relative))) {
+              throw "FSR SDK 2.3.0 header missing: $relative"
+            }
+          }
 
-          $header = Get-ChildItem -Path $sdk.FullName -Recurse -Filter "ffx_api.h" | Where-Object { $_.FullName -match "ffx_api[\\/]ffx_api\.h$" } | Select-Object -First 1
-          $dll = Get-ChildItem -Path $sdk.FullName -Recurse -Filter "amd_fidelityfx_dx12.dll" | Select-Object -First 1
-
-          if (-not $header) { throw "FidelityFX SDK header ffx_api/ffx_api.h was not found." }
-          if (-not $dll) { throw "FidelityFX SDK runtime amd_fidelityfx_dx12.dll was not found." }
+          $dllNames = @(
+            "amd_fidelityfx_loader_dx12.dll",
+            "amd_fidelityfx_framegeneration_dx12.dll",
+            "amd_fidelityfx_upscaler_dx12.dll"
+          )
+          foreach ($dllName in $dllNames) {
+            $found = Get-ChildItem -Path $runtimeRoot -Recurse -File -Filter $dllName | Select-Object -First 1
+            if (-not $found) { throw "FSR SDK 2.3.0 runtime DLL missing from prebuilt package: $dllName" }
+            Copy-Item -LiteralPath $found.FullName -Destination (Join-Path $binRoot $dllName) -Force
+            Write-Host "$dllName => $($found.FullName)"
+          }
 
           "FFX_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "FFX_DLL=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
+          "FFX_BIN=$binRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "FSR SDK root: $($sdk.FullName)"
-          Write-Host "FSR header:   $($header.FullName)"
-          Write-Host "FSR runtime:  $($dll.FullName)"
+          Write-Host "FSR runtime folder: $binRoot"
 
       - name: Configure
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cmake -S . -B build -A x64 -DFFX_SDK="$env:FFX_SDK" -DBUILD_TESTING=ON
+          cmake -S . -B build -A x64 -DFFX_SDK="$env:FFX_SDK" -DFFX_BIN="$env:FFX_BIN" -DBUILD_TESTING=ON
 
       - name: Build Release
         shell: pwsh
@@ -67,12 +87,20 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           if (-not (Test-Path "build/Release/NRLive.exe")) { throw "NRLive.exe was not produced." }
-          if (-not (Test-Path "build/Release/amd_fidelityfx_dx12.dll")) { throw "amd_fidelityfx_dx12.dll was not staged beside NRLive.exe." }
+          foreach ($dll in @(
+            "amd_fidelityfx_loader_dx12.dll",
+            "amd_fidelityfx_framegeneration_dx12.dll",
+            "amd_fidelityfx_upscaler_dx12.dll"
+          )) {
+            if (-not (Test-Path "build/Release/$dll")) { throw "$dll was not staged beside NRLive.exe." }
+          }
 
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: NRLive-windows-x64
+          name: NRLive-windows-x64-fsr-sdk-2.3.0
           path: |
             build/Release/NRLive.exe
-            build/Release/amd_fidelityfx_dx12.dll
+            build/Release/amd_fidelityfx_loader_dx12.dll
+            build/Release/amd_fidelityfx_framegeneration_dx12.dll
+            build/Release/amd_fidelityfx_upscaler_dx12.dll

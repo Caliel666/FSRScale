@@ -4,121 +4,42 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ---------------------------------------------------------------------------
-# FidelityFX SDK 1.1.4
-# Full source tree:  <SDK>/ffx-api/include/ffx_api/...
-# Minimal package:   <SDK>/PrebuiltSignedDLL/amd_fidelityfx_dx12.{dll,lib}
-# Headers are always required from ffx-api/include (or a mirrored layout).
-# ---------------------------------------------------------------------------
-set(FFX_SDK "" CACHE PATH "AMD FidelityFX SDK 1.1.4 root (folder that contains ffx-api and/or PrebuiltSignedDLL)")
-
+# AMD FSR SDK 2.3.0. Headers come from the SDK source archive; signed runtime
+# providers come from the release's prebuilt package.
+set(FFX_SDK "" CACHE PATH "AMD FSR SDK 2.3.0 source root")
+set(FFX_BIN "" CACHE PATH "Directory containing the signed FSR SDK 2.3.0 DX12 DLLs")
 if(NOT FFX_SDK)
-  message(FATAL_ERROR
-    "Set -DFFX_SDK= to your FidelityFX SDK 1.1.4 root.\n"
-    "Example:\n"
-    "  cmake ... -DFFX_SDK=C:/Users/Demuriel/Documents/my-apps/FidelityFX-SDK-v1.1.4")
+  message(FATAL_ERROR "Set -DFFX_SDK= to the extracted FidelityFX-SDK v2.3.0 source root.")
 endif()
-
-# Normalise: strip trailing slash / accidental junk
 get_filename_component(FFX_SDK "${FFX_SDK}" ABSOLUTE)
-
-message(STATUS "FFX_SDK = ${FFX_SDK}")
-
-# --- Headers: look for ffx_api/ffx_api.h under several known layouts ---------
-set(_FFX_INCLUDE_CANDIDATES
-  "${FFX_SDK}/ffx-api/include"
-  "${FFX_SDK}/ffx-api/include/ffx_api/.."
-  "${FFX_SDK}/include"
-  "${FFX_SDK}/Kits/FidelityFX/api/include"
-  "${FFX_SDK}/Kits/FidelityFX/api/include/.."
-  "${CMAKE_SOURCE_DIR}/third_party"
-  "${CMAKE_SOURCE_DIR}/third_party/ffx/.."
-)
-
-find_path(FFX_INCLUDE
-  NAMES ffx_api/ffx_api.h
-  PATHS ${_FFX_INCLUDE_CANDIDATES}
-  NO_DEFAULT_PATH
-)
-
-# Also accept a tree where headers live directly as ffx_api.h (no ffx_api/ subdir)
-if(NOT FFX_INCLUDE)
-  find_path(FFX_INCLUDE_FLAT
-    NAMES ffx_api.h
-    PATHS
-      "${FFX_SDK}/ffx-api/include/ffx_api"
-      "${FFX_SDK}/PrebuiltSignedDLL"
-      "${CMAKE_SOURCE_DIR}/third_party/ffx"
-    NO_DEFAULT_PATH
-  )
-  if(FFX_INCLUDE_FLAT)
-    # Parent so that #include <ffx_api/ffx_api.h> still works if we mirror layout
-    get_filename_component(FFX_INCLUDE "${FFX_INCLUDE_FLAT}" DIRECTORY)
-  endif()
+if(NOT FFX_BIN)
+  set(FFX_BIN "${FFX_SDK}/PrebuiltSignedDLL")
 endif()
+get_filename_component(FFX_BIN "${FFX_BIN}" ABSOLUTE)
 
-if(NOT FFX_INCLUDE)
-  message(FATAL_ERROR
-    "Could not find ffx_api/ffx_api.h under FFX_SDK.\n"
-    "  FFX_SDK was: ${FFX_SDK}\n"
-    "Expected one of:\n"
-    "  ${FFX_SDK}/ffx-api/include/ffx_api/ffx_api.h\n"
-    "  ${FFX_SDK}/include/ffx_api/ffx_api.h\n"
-    "Make sure you extracted the FULL SDK 1.1.4 (not only the DLL zip),\n"
-    "or that the path does not have trailing garbage (e.g. ...1.1.4clear).")
-endif()
-
-message(STATUS "FFX_INCLUDE = ${FFX_INCLUDE}")
-
-# Upscale headers are required by fsr.h
-if(NOT EXISTS "${FFX_INCLUDE}/ffx_api/ffx_upscale.h" AND
-   NOT EXISTS "${FFX_INCLUDE}/ffx_upscale.h")
-  # Some trees nest differently; warn but continue if parent has them
-  file(GLOB_RECURSE _UP_H "${FFX_SDK}/*/ffx_upscale.h")
-  if(NOT _UP_H)
-    message(WARNING
-      "ffx_upscale.h not found next to ffx_api.h. "
-      "Build may fail if the SDK is incomplete.")
-  endif()
-endif()
-
-# --- Import library --------------------------------------------------------
-set(_FFX_LIB_CANDIDATES
-  "${FFX_SDK}/ffx-api/bin"
-  "${FFX_SDK}/PrebuiltSignedDLL"
-  "${FFX_SDK}/bin"
-  "${FFX_SDK}/Kits/FidelityFX/bin"
-  "${FFX_SDK}/Kits/FidelityFX/lib"
-  "${FFX_SDK}/sdk/bin"
-  "${FFX_SDK}/sdk/libs"
-)
-
-find_library(FFX_LIB
-  NAMES amd_fidelityfx_dx12
-  PATHS ${_FFX_LIB_CANDIDATES}
-  NO_DEFAULT_PATH
-)
-
-if(NOT FFX_LIB)
-  message(STATUS "amd_fidelityfx_dx12.lib not required (runtime GetProcAddress)")
-  set(FFX_LIB "")
-endif()
-
-message(STATUS "FFX_LIB = ${FFX_LIB}")
-
-# --- Runtime DLL (copied next to the EXE) ----------------------------------
-set(_FFX_DLL "")
-foreach(_dir ${_FFX_LIB_CANDIDATES})
-  if(EXISTS "${_dir}/amd_fidelityfx_dx12.dll")
-    set(_FFX_DLL "${_dir}/amd_fidelityfx_dx12.dll")
-    break()
+set(FFX_INCLUDE_API "${FFX_SDK}/Kits/FidelityFX/api/include")
+set(FFX_INCLUDE_FG "${FFX_SDK}/Kits/FidelityFX/framegeneration/include")
+set(FFX_INCLUDE_UPSCALER "${FFX_SDK}/Kits/FidelityFX/upscalers/include")
+foreach(_include "${FFX_INCLUDE_API}" "${FFX_INCLUDE_FG}" "${FFX_INCLUDE_UPSCALER}")
+  if(NOT EXISTS "${_include}")
+    message(FATAL_ERROR "FSR SDK 2.3.0 include directory missing: ${_include}")
   endif()
 endforeach()
-if(NOT _FFX_DLL)
-  message(WARNING "amd_fidelityfx_dx12.dll not found; copy it beside NRLive.exe manually.")
-else()
-  message(STATUS "FFX_DLL = ${_FFX_DLL}")
-endif()
+
+set(_FFX_DLL_SEARCH_PATHS "${FFX_BIN}" "${FFX_SDK}/PrebuiltSignedDLL"
+    "${FFX_SDK}/Kits/FidelityFX/bin" "${FFX_SDK}/bin")
+find_file(FFX_DLL_LOADER NAMES amd_fidelityfx_loader_dx12.dll
+  PATHS ${_FFX_DLL_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_file(FFX_DLL_FRAMEGEN NAMES amd_fidelityfx_framegeneration_dx12.dll
+  PATHS ${_FFX_DLL_SEARCH_PATHS} NO_DEFAULT_PATH)
+find_file(FFX_DLL_UPSCALER NAMES amd_fidelityfx_upscaler_dx12.dll
+  PATHS ${_FFX_DLL_SEARCH_PATHS} NO_DEFAULT_PATH)
+foreach(_required_var FFX_DLL_LOADER FFX_DLL_FRAMEGEN FFX_DLL_UPSCALER)
+  if(NOT ${_required_var})
+    message(FATAL_ERROR "Required FSR SDK 2.3.0 runtime missing: ${_required_var}. Set -DFFX_BIN= to the folder containing the signed DX12 DLLs.")
+  endif()
+  message(STATUS "FSR runtime ${_required_var}: ${${_required_var}}")
+endforeach()
 
 # ---------------------------------------------------------------------------
 add_executable(NRLive WIN32
@@ -136,12 +57,14 @@ add_executable(NRLive WIN32
 )
 
 target_include_directories(NRLive PRIVATE
-  "${FFX_INCLUDE}"
+  "${FFX_INCLUDE_API}"
+  "${FFX_INCLUDE_FG}"
+  "${FFX_INCLUDE_UPSCALER}"
   "${CMAKE_SOURCE_DIR}/include"
 )
 
 target_compile_definitions(NRLive PRIVATE
-  UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
+  UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN PLATFORM_WINDOWS
 )
 
 target_link_libraries(NRLive PRIVATE
@@ -152,13 +75,13 @@ set_target_properties(NRLive PROPERTIES
   VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:NRLive>"
 )
 
-if(_FFX_DLL)
+foreach(_dll_path "${FFX_DLL_LOADER}" "${FFX_DLL_FRAMEGEN}" "${FFX_DLL_UPSCALER}")
   add_custom_command(TARGET NRLive POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${_FFX_DLL}"
+      "${_dll_path}"
       "$<TARGET_FILE_DIR:NRLive>"
   )
-endif()
+endforeach()
 
 if(BUILD_TESTING)
   add_executable(frame_timing_test tests/frame_timing_test.cpp)

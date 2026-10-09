@@ -1,9 +1,10 @@
 #include "fsr.h"
 #include "graphics.h"
-#include <ffx_api/ffx_api_loader.h>
+#include <ffx_api_loader.h>
 #include <cfloat>
 #include <mutex>
 #include <string>
+#include <fstream>
 
 // CRITICAL for OptiScaler:
 // Call ffxCreateContext / ffxDispatch ONLY through the module OptiScaler hooks
@@ -32,14 +33,31 @@ static std::wstring exeDir()
   return d;
 }
 
+static std::mutex g_logMutex;
+static void logFfx(const std::wstring& message)
+{
+  std::lock_guard<std::mutex> lock(g_logMutex);
+  std::wofstream file(exeDir() + L"NRLive-fg.log", std::ios::out | std::ios::app);
+  if (file) file << message << L"\n";
+}
+
 static bool resolve(HMODULE m)
 {
   if (!m) return false;
-  ffxLoadFunctions(&g_ffx, m);
-  if (g_ffx.CreateContext && g_ffx.Dispatch)
-    return true;
-  // Loader may re-export from upscaler module only
+  ffxFunctions loaded{};
+  ffxLoadFunctions(&loaded, m);
+  g_ffx = loaded;
+
+  // Some loader builds expose the core entry points while the effect module
+  // exposes additional API calls. Fill only missing pointers; never overwrite
+  // functions already provided by the selected runtime.
   HMODULE up = GetModuleHandleW(L"amd_fidelityfx_upscaler_dx12.dll");
+  if (!up) {
+    const std::wstring dir = exeDir();
+    const std::wstring candidate = dir + L"amd_fidelityfx_upscaler_dx12.dll";
+    if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
+      up = LoadLibraryW(candidate.c_str());
+  }
   if (up) {
     ffxFunctions upFn{};
     ffxLoadFunctions(&upFn, up);
@@ -49,7 +67,8 @@ static bool resolve(HMODULE m)
     if (!g_ffx.Query) g_ffx.Query = upFn.Query;
     if (!g_ffx.Configure) g_ffx.Configure = upFn.Configure;
   }
-  return g_ffx.CreateContext && g_ffx.Dispatch;
+  return g_ffx.CreateContext && g_ffx.DestroyContext &&
+         g_ffx.Dispatch && g_ffx.Configure && g_ffx.Query;
 }
 
 static bool loadFfx()
@@ -121,7 +140,11 @@ bool Fsr::init(ID3D12Device* device, Size maxRender, Size maxDisplay)
 
   ffxCreateContextDescUpscale up{};
   up.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
-  up.header.pNext = &backend.header;
+  ffxCreateContextDescUpscaleVersion upVersion{};
+  upVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION;
+  upVersion.version = FFX_UPSCALER_VERSION;
+  upVersion.header.pNext = &backend.header;
+  up.header.pNext = &upVersion.header;
   up.maxRenderSize = { maxRender.w, maxRender.h };
   up.maxUpscaleSize = { maxDisplay.w, maxDisplay.h };
   up.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE |
@@ -222,4 +245,314 @@ void Fsr::shutdown()
   if (m_ctx && g_ffx.DestroyContext)
     g_ffx.DestroyContext(&m_ctx, nullptr);
   m_ctx = nullptr;
+}
+
+
+// ---------------------------------------------------------------------------
+// AMD FSR Frame Generation with the SDK's frame-interpolation swapchain.
+// The swapchain owns pacing and invokes generationCallback during Present.
+bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display,
+                              IDXGISwapChain4** swapChain, ID3D12CommandQueue* queue)
+{
+  shutdown();
+  if (!device || !swapChain || !*swapChain || !queue || !ensure() ||
+      !g_ffx.CreateContext || !g_ffx.Dispatch || !g_ffx.DestroyContext ||
+      !g_ffx.Configure || !g_ffx.Query) {
+    m_error = L"FSR FG API unavailable (missing FFX context, query, dispatch or configure entry points)";
+    logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
+    // The caller passes one owned reference specifically for wrapping.
+    if (swapChain && *swapChain) { (*swapChain)->Release(); *swapChain = nullptr; }
+    return false;
+  }
+  ffxCreateContextDescFrameGenerationSwapChainWrapDX12 wrap{};
+  wrap.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WRAP_DX12;
+  ffxCreateContextDescFrameGenerationSwapChainVersionDX12 wrapVersion{};
+  wrapVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_VERSION_DX12;
+  wrapVersion.version = FFX_FRAMEGENERATION_SWAPCHAIN_DX12_VERSION;
+  wrapVersion.header.pNext = nullptr;
+  wrap.header.pNext = &wrapVersion.header;
+  wrap.swapchain = swapChain;
+  wrap.gameQueue = queue;
+  ffxReturnCode_t rc = g_ffx.CreateContext(&m_swapChainCtx, &wrap.header, nullptr);
+  if (rc != FFX_API_RETURN_OK || !m_swapChainCtx || !*swapChain) {
+    m_error = L"FSR FG swapchain wrapping failed 0x" + hex((uint32_t)rc);
+    logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
+    if (m_swapChainCtx) g_ffx.DestroyContext(&m_swapChainCtx, nullptr);
+    m_swapChainCtx = nullptr;
+    // The SDK may already have released the original chain while attempting
+    // replacement. Do not let the caller reuse that pointer after failure.
+    *swapChain = nullptr;
+    return false;
+  }
+  m_swapChain = *swapChain;
+  m_device = device;
+
+  ffxCreateBackendDX12Desc backend{};
+  backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
+  backend.header.pNext = nullptr;
+  backend.device = device;
+  ffxCreateContextDescFrameGeneration fg{};
+  fg.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
+  ffxCreateContextDescFrameGenerationVersion fgVersion{};
+  fgVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION;
+  fgVersion.version = FFX_FRAMEGENERATION_VERSION;
+  fgVersion.header.pNext = &backend.header;
+  fg.header.pNext = &fgVersion.header;
+  fg.flags = FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED |
+             FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE;
+  fg.displaySize = { display.w, display.h };
+  fg.maxRenderSize = { maxRender.w, maxRender.h };
+  fg.backBufferFormat = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM;
+  rc = g_ffx.CreateContext(&m_ctx, &fg.header, nullptr);
+  if (rc != FFX_API_RETURN_OK || !m_ctx) {
+    m_error = L"FSR FG context creation failed 0x" + hex((uint32_t)rc);
+    logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
+    if (m_swapChainCtx) g_ffx.DestroyContext(&m_swapChainCtx, nullptr);
+    m_swapChainCtx = nullptr;
+    m_swapChain = nullptr;
+    m_ctx = nullptr;
+    // Destroying the wrapper context may destroy its replacement swapchain.
+    *swapChain = nullptr;
+    return false;
+  }
+  m_maxRender = maxRender;
+  m_display = display;
+  m_frameId = 0;
+  m_callbackEnabled = false;
+  m_pendingReset = true;
+  m_failed = false;
+  m_error = L"FSR FG ready; AMD frame-interpolation swapchain active [" + g_info + L"]";
+  logFfx(L"FG init OK; selected FFX module=" + g_info);
+  return true;
+}
+
+ffxReturnCode_t FsrFrameGeneration::generationCallback(
+    ffxDispatchDescFrameGeneration* params, void* userCtx)
+{
+  auto* self = static_cast<FsrFrameGeneration*>(userCtx);
+  if (!self || !params || !g_ffx.Dispatch)
+    return FFX_API_RETURN_ERROR_PARAMETER;
+  std::lock_guard<std::mutex> lock(self->m_mutex);
+  if (!self->m_ctx)
+    return FFX_API_RETURN_ERROR_PARAMETER;
+  // A provider can race a failure/toggle with Present. If generation was
+  // disabled after configuration, leave the ordinary present path intact.
+  if (!self->m_callbackEnabled)
+    return FFX_API_RETURN_OK;
+  params->reset = params->reset || self->m_pendingReset;
+  const ffxReturnCode_t rc = g_ffx.Dispatch(&self->m_ctx, &params->header);
+  if (rc == FFX_API_RETURN_OK)
+    self->m_pendingReset = false;
+  if (rc != FFX_API_RETURN_OK) {
+    self->m_failed = true;
+    self->m_callbackEnabled = false;
+    self->m_error = L"FSR FG generation callback failed 0x" + hex((uint32_t)rc);
+    logFfx(self->m_error + L"; frameId=" + std::to_wstring(params->frameID));
+  }
+  return rc;
+}
+
+bool FsrFrameGeneration::resize(Size maxRender, Size display)
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (!m_swapChainCtx || !g_ffx.CreateContext || !g_ffx.DestroyContext || !m_device) {
+    m_error = L"FSR FG resize failed: swapchain context or device unavailable";
+    return false;
+  }
+
+  const bool wasEnabled = m_callbackEnabled;
+  ffxCreateBackendDX12Desc backend{};
+  backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
+  backend.header.pNext = nullptr;
+  backend.device = m_device;
+  ffxCreateContextDescFrameGeneration fg{};
+  fg.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
+  ffxCreateContextDescFrameGenerationVersion fgVersion{};
+  fgVersion.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION;
+  fgVersion.version = FFX_FRAMEGENERATION_VERSION;
+  fgVersion.header.pNext = &backend.header;
+  fg.header.pNext = &fgVersion.header;
+  fg.flags = FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED |
+             FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE;
+  fg.displaySize = { display.w, display.h };
+  fg.maxRenderSize = { maxRender.w, maxRender.h };
+  fg.backBufferFormat = FFX_API_SURFACE_FORMAT_R8G8B8A8_UNORM;
+
+  // Create the replacement first. If allocation fails, the old context remains
+  // valid so the next frame can still configure the wrapper for safe fallback.
+  ffxContext resizedCtx = nullptr;
+  const ffxReturnCode_t rc = g_ffx.CreateContext(&resizedCtx, &fg.header, nullptr);
+  if (rc != FFX_API_RETURN_OK || !resizedCtx) {
+    m_callbackEnabled = wasEnabled;
+    m_error = L"FSR FG resize context creation failed 0x" + hex((uint32_t)rc);
+    return false;
+  }
+  if (m_ctx && g_ffx.DestroyContext)
+    g_ffx.DestroyContext(&m_ctx, nullptr);
+  m_ctx = resizedCtx;
+  m_callbackEnabled = false;
+  m_pendingReset = true;
+  m_failed = false;
+  m_maxRender = maxRender;
+  m_display = display;
+  m_error = L"FSR FG context resized";
+  return true;
+}
+
+bool FsrFrameGeneration::prepare(ID3D12GraphicsCommandList* cmd,
+                                 ID3D12Resource* depth,
+                                 ID3D12Resource* motionVectors,
+                                 Size render, Size display,
+                                 float dt, bool reset, bool enabled)
+{
+  bool priorFailure = failed();
+  if (priorFailure) enabled = false;
+  if (!m_ctx || !m_swapChainCtx || !g_ffx.Configure || !g_ffx.Dispatch || !cmd) {
+    m_error = L"FSR FG prepare skipped: runtime or swapchain unavailable";
+    return false;
+  }
+  if ((enabled && (render.w > m_maxRender.w || render.h > m_maxRender.h)) ||
+      display.w != m_display.w || display.h != m_display.h) {
+    m_error = L"FSR FG prepare skipped: resolution changed; recreate context";
+    return false;
+  }
+  if (enabled && (!depth || !motionVectors)) {
+    m_error = L"FSR FG prepare skipped: depth or motion vectors unavailable";
+    enabled = false;
+  }
+
+  std::lock_guard<std::mutex> lock(m_mutex);
+  // Recheck under the same lock used by the Present callback so a late
+  // callback failure cannot race with a new frame re-enabling generation.
+  if (m_failed) {
+    priorFailure = true;
+    enabled = false;
+  }
+  const uint64_t frameId = m_frameId;
+  ffxConfigureDescFrameGeneration config{};
+  config.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
+  config.header.pNext = nullptr;
+  config.swapChain = m_swapChain;
+  config.presentCallback = nullptr;
+  config.presentCallbackUserContext = nullptr;
+  config.frameGenerationCallback = enabled ? &FsrFrameGeneration::generationCallback : nullptr;
+  config.frameGenerationCallbackUserContext = enabled ? this : nullptr;
+  config.frameGenerationEnabled = enabled;
+  config.allowAsyncWorkloads = false;
+  config.HUDLessColor = {};
+  config.flags = 0;
+  config.onlyPresentGenerated = false;
+  config.generationRect = { 0, 0, (int32_t)display.w, (int32_t)display.h };
+  config.frameID = frameId;
+  ffxReturnCode_t rc = g_ffx.Configure(&m_ctx, &config.header);
+  if (rc != FFX_API_RETURN_OK) {
+    m_error = L"FSR FG configure failed 0x" + hex((uint32_t)rc);
+    logFfx(m_error + L"; frameId=" + std::to_wstring(frameId));
+    m_callbackEnabled = false;
+    return false;
+  }
+
+  m_callbackEnabled = false;
+  m_pendingReset = enabled && reset;
+  if (enabled) {
+    ffxDispatchDescFrameGenerationPrepareV2 prep{};
+    prep.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2;
+    prep.header.pNext = nullptr;
+    prep.frameID = frameId;
+    prep.flags = 0;
+    prep.commandList = cmd;
+    prep.renderSize = { render.w, render.h };
+    prep.jitterOffset = { 0.0f, 0.0f };
+    prep.motionVectorScale = { 1.0f, 1.0f };
+    prep.frameTimeDelta = dt > 0.0f ? dt : (1000.0f / 60.0f);
+    prep.reset = reset;
+    prep.cameraNear = 0.01f;
+    prep.cameraFar = 1000.0f;
+    prep.cameraFovAngleVertical = 1.0f;
+    prep.viewSpaceToMetersFactor = 1.0f;
+    prep.cameraPosition[0] = prep.cameraPosition[1] = prep.cameraPosition[2] = 0.0f;
+    prep.cameraUp[0] = 0.0f; prep.cameraUp[1] = 1.0f; prep.cameraUp[2] = 0.0f;
+    prep.cameraRight[0] = 1.0f; prep.cameraRight[1] = 0.0f; prep.cameraRight[2] = 0.0f;
+    prep.cameraForward[0] = 0.0f; prep.cameraForward[1] = 0.0f; prep.cameraForward[2] = 1.0f;
+    prep.depth = apiRes(depth, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+    prep.motionVectors = apiRes(motionVectors, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+    rc = g_ffx.Dispatch(&m_ctx, &prep.header);
+    if (rc != FFX_API_RETURN_OK) {
+      config.frameGenerationEnabled = false;
+      config.frameGenerationCallback = nullptr;
+      config.frameGenerationCallbackUserContext = nullptr;
+      g_ffx.Configure(&m_ctx, &config.header);
+      ++m_frameId;
+      m_error = L"FSR FG prepare dispatch failed 0x" + hex((uint32_t)rc);
+      return false;
+    }
+    m_callbackEnabled = true;
+  }
+  ++m_frameId;
+  m_error = priorFailure ? L"FSR FG disabled after generation callback failure" :
+            (enabled ? L"FSR FG prepared for paced Present" : L"FSR FG disabled for this frame");
+  return true;
+}
+
+bool FsrFrameGeneration::failed() const
+{
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_failed;
+}
+
+void FsrFrameGeneration::shutdown()
+{
+  // The caller stops the render loop and drains NRLive's queue before entering
+  // shutdown. Acquire the same lock as generationCallback so no callback can
+  // be executing against m_ctx while we disable the proxy and destroy contexts.
+  std::lock_guard<std::mutex> lock(m_mutex);
+  const bool wasCallbackEnabled = m_callbackEnabled;
+  m_callbackEnabled = false;
+  m_pendingReset = true;
+  m_failed = false;
+
+  // Avoid a provider Configure/flush on the common disabled path. If generation
+  // was active, explicitly disable it before destroying the effect context.
+  if (m_ctx && m_swapChain && g_ffx.Configure && wasCallbackEnabled) {
+    // Required by FidelityFX: disabling through the proxy flushes interpolation
+    // and UI/present work that may still reference resources owned by m_ctx.
+    // DestroyContext alone does not provide this synchronization and can stall
+    // or trip D3D12 "object deleted while still in use" validation on exit.
+    ffxConfigureDescFrameGeneration config{};
+    config.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
+    config.header.pNext = nullptr;
+    config.swapChain = m_swapChain;
+    config.presentCallback = nullptr;
+    config.presentCallbackUserContext = nullptr;
+    config.frameGenerationCallback = nullptr;
+    config.frameGenerationCallbackUserContext = nullptr;
+    config.frameGenerationEnabled = false;
+    config.allowAsyncWorkloads = false;
+    config.HUDLessColor = {};
+    config.flags = 0;
+    config.onlyPresentGenerated = false;
+    config.generationRect = { 0, 0, (int32_t)m_display.w, (int32_t)m_display.h };
+    config.frameID = m_frameId;
+    const ffxReturnCode_t rc = g_ffx.Configure(&m_ctx, &config.header);
+    if (rc != FFX_API_RETURN_OK) {
+      m_error = L"FSR FG shutdown configure failed 0x" + hex((uint32_t)rc);
+      logFfx(m_error);
+    } else {
+      logFfx(L"FG shutdown configure succeeded; contexts will now be destroyed");
+    }
+  }
+
+  // Destroy the effect context before the wrapper context, then let Graphics
+  // release the wrapped IDXGISwapChain after this method returns.
+  if (m_ctx && g_ffx.DestroyContext)
+    g_ffx.DestroyContext(&m_ctx, nullptr);
+  m_ctx = nullptr;
+  if (m_swapChainCtx && g_ffx.DestroyContext)
+    g_ffx.DestroyContext(&m_swapChainCtx, nullptr);
+  m_swapChainCtx = nullptr;
+  m_swapChain = nullptr;
+  m_device = nullptr;
+  m_maxRender = {};
+  m_display = {};
+  m_frameId = 0;
 }
