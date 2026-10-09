@@ -242,6 +242,24 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     }
     logMain(L"Graphics::init OK");
 
+    // The add-on binds to this output runtime, then applies effects to the
+    // named intermediate texture before FSR consumes it. Loading dxgi.dll
+    // alone only hooks Present and would otherwise leave effects after FSR.
+    bool reshadeStageEnabled = false;
+    if (reshade.enabled) {
+      HMODULE preFsrAddon = GetModuleHandleW(L"NRLive-PreFSR.addon64");
+      using SetOutputWindowFn = BOOL (WINAPI *)(HWND);
+      auto setOutputWindow = preFsrAddon
+        ? reinterpret_cast<SetOutputWindowFn>(GetProcAddress(preFsrAddon, "NRLiveSetOutputWindow"))
+        : nullptr;
+      if (setOutputWindow && setOutputWindow(out)) {
+        reshadeStageEnabled = true;
+        logMain(L"ReShade pre-FSR effects stage connected to NRLive output runtime.");
+      } else {
+        logMain(L"ReShade pre-FSR add-on/runtime unavailable; pre-FSR effects stage disabled.");
+      }
+    }
+
     Capture cap;
     if (!cap.init(gfx.device(), gfx.queue()) || !cap.start(target)) {
       std::wstring msg = L"Capture failed: " + cap.lastError();
@@ -513,8 +531,44 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       ID3D12Resource* reactive = gfx.reactiveMask();
 
       ID3D12Resource* presentSrc = color.Get();
+      ID3D12Resource* fsrColor = color.Get();
       bool usedFsr = false;
       const bool resetThisFrame = reset;
+
+      // Transition captured color once for both the optional ReShade stage and
+      // the motion/upscale inputs. ReShade effects are rendered into a separate
+      // render target so the captured source remains available to optical flow.
+      D3D12_RESOURCE_BARRIER colorToRead{};
+      colorToRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+      colorToRead.Transition.pResource = color.Get();
+      colorToRead.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+      colorToRead.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+      colorToRead.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+      cmd->ResourceBarrier(1, &colorToRead);
+
+      if (reshadeStageEnabled && gfx.preFsrColor()) {
+        ID3D12Resource* preFsr = gfx.preFsrColor();
+        D3D12_RESOURCE_BARRIER toTarget{};
+        toTarget.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        toTarget.Transition.pResource = preFsr;
+        toTarget.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        toTarget.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        toTarget.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        cmd->ResourceBarrier(1, &toTarget);
+        gfx.blitToPreFsr(color.Get()); // unbind triggers ReShade's render_effects()
+        D3D12_RESOURCE_BARRIER toRead{};
+        toRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        toRead.Transition.pResource = preFsr;
+        toRead.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        toRead.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        toRead.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        cmd->ResourceBarrier(1, &toRead);
+        fsrColor = preFsr;
+        presentSrc = preFsr;
+      }
 
       if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
@@ -524,21 +578,18 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         // (mv stays in UAV — AMDOF writes it; AMDOF will leave it in PS|NPS
         //  so FSR can read it directly without an extra barrier.)
         {
-          D3D12_RESOURCE_BARRIER b[3]{};
-          for (int i = 0; i < 3; ++i) {
+          D3D12_RESOURCE_BARRIER b[2]{};
+          for (int i = 0; i < 2; ++i) {
             b[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             b[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
           }
-          b[0].Transition.pResource = color.Get();
-          b[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+          b[0].Transition.pResource = depth;
+          b[0].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
           b[0].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-          b[1].Transition.pResource = depth;
-          b[1].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-          b[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-          b[2].Transition.pResource = upscale;
-          b[2].Transition.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-          b[2].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-          cmd->ResourceBarrier(3, b);
+          b[1].Transition.pResource = upscale;
+          b[1].Transition.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+          b[1].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+          cmd->ResourceBarrier(2, b);
         }
 
         // Motion dispatch. --mv amdof is the existing implementation; --mv fast is the
@@ -575,11 +626,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
         // FSR dispatch (reads color/depth/mv as SRV, writes upscale as UAV).
         // No barrier needed for mv — AMDOF left it in PS|NPS.
-        usedFsr = motionReady && fsr.dispatch(cmd, color.Get(), depth, mv,
+        usedFsr = motionReady && fsr.dispatch(cmd, fsrColor, depth, mv,
                                               reactiveReady ? reactive : nullptr,
                                               upscale, cs, display, dt, reset);
         reset = false;
-        presentSrc = usedFsr ? upscale : color.Get();
+        presentSrc = usedFsr ? upscale : fsrColor;
 
         // ---- Batch C: post-FSR cleanup + presentation prep ----------------
         //   upscale: UAV -> PS|NPS (if usedFsr, blit reads as SRV)
@@ -626,8 +677,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
           b[n].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
           ++n;
         };
-        tr(color.Get(), D3D12_RESOURCE_STATE_COMMON,
-           D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tr(back, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
         cmd->ResourceBarrier(n, b);
       }
