@@ -44,11 +44,20 @@ static void logFfx(const std::wstring& message)
 static bool resolve(HMODULE m)
 {
   if (!m) return false;
-  ffxLoadFunctions(&g_ffx, m);
-  if (g_ffx.CreateContext && g_ffx.Dispatch)
-    return true;
-  // Loader may re-export from upscaler module only
+  ffxFunctions loaded{};
+  ffxLoadFunctions(&loaded, m);
+  g_ffx = loaded;
+
+  // Some loader builds expose the core entry points while the effect module
+  // exposes additional API calls. Fill only missing pointers; never overwrite
+  // functions already provided by the selected runtime.
   HMODULE up = GetModuleHandleW(L"amd_fidelityfx_upscaler_dx12.dll");
+  if (!up) {
+    const std::wstring dir = exeDir();
+    const std::wstring candidate = dir + L"amd_fidelityfx_upscaler_dx12.dll";
+    if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
+      up = LoadLibraryW(candidate.c_str());
+  }
   if (up) {
     ffxFunctions upFn{};
     ffxLoadFunctions(&upFn, up);
@@ -58,7 +67,8 @@ static bool resolve(HMODULE m)
     if (!g_ffx.Query) g_ffx.Query = upFn.Query;
     if (!g_ffx.Configure) g_ffx.Configure = upFn.Configure;
   }
-  return g_ffx.CreateContext && g_ffx.Dispatch;
+  return g_ffx.CreateContext && g_ffx.DestroyContext &&
+         g_ffx.Dispatch && g_ffx.Configure && g_ffx.Query;
 }
 
 static bool loadFfx()
