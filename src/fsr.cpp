@@ -260,6 +260,8 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
       !g_ffx.Configure || !g_ffx.Query) {
     m_error = L"FSR FG API unavailable (missing FFX context, query, dispatch or configure entry points)";
     logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
+    // The caller passes one owned reference specifically for wrapping.
+    if (swapChain && *swapChain) { (*swapChain)->Release(); *swapChain = nullptr; }
     return false;
   }
   ffxCreateContextDescFrameGenerationSwapChainWrapDX12 wrap{};
@@ -277,6 +279,9 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
     logFfx(L"FG init failed: " + m_error + L"; selected FFX module=" + g_info);
     if (m_swapChainCtx) g_ffx.DestroyContext(&m_swapChainCtx, nullptr);
     m_swapChainCtx = nullptr;
+    // The SDK may already have released the original chain while attempting
+    // replacement. Do not let the caller reuse that pointer after failure.
+    *swapChain = nullptr;
     return false;
   }
   m_swapChain = *swapChain;
@@ -306,6 +311,8 @@ bool FsrFrameGeneration::init(ID3D12Device* device, Size maxRender, Size display
     m_swapChainCtx = nullptr;
     m_swapChain = nullptr;
     m_ctx = nullptr;
+    // Destroying the wrapper context may destroy its replacement swapchain.
+    *swapChain = nullptr;
     return false;
   }
   m_maxRender = maxRender;
@@ -503,7 +510,7 @@ void FsrFrameGeneration::shutdown()
   m_pendingReset = true;
   m_failed = false;
 
-  if (m_ctx && m_swapChain && g_ffx.Configure) {
+  if (m_ctx && m_swapChain && g_ffx.Configure && m_callbackEnabled) {
     // Required by FidelityFX: disabling through the proxy flushes interpolation
     // and UI/present work that may still reference resources owned by m_ctx.
     // DestroyContext alone does not provide this synchronization and can stall
