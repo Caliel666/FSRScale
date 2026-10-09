@@ -10,4 +10,8 @@
     <RootNamespace>NRLiveUI</RootNamespace>
     <ApplicationIcon>img\Icon.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="img\Icon.png" />
+    <Resource Include="img\Icon.ico" />
+  </ItemGroup>
 </Project>
