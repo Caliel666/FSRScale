@@ -2,6 +2,7 @@
 #include <d3d12.h>
 #include <reshade.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cwchar>
 #include <iterator>
 #include <mutex>
@@ -16,6 +17,8 @@ constexpr wchar_t kPreFsrResourceName[] = L"NRLive_PreFSR_Color";
 constexpr GUID kDebugObjectNameW = { 0x4cca5fd8, 0x921f, 0x42c8, { 0x85, 0x66, 0x70, 0xca, 0xf2, 0xa9, 0xb7, 0x41 } };
 
 std::mutex g_mutex;
+std::atomic_bool g_loggedPreFsr{ false };
+std::atomic_bool g_loggedMissingRuntime{ false };
 HWND g_outputWindow = nullptr;
 std::vector<effect_runtime *> g_runtimes;
 std::unordered_map<command_list *, resource_view> g_boundRtvs;
@@ -93,13 +96,15 @@ void onBindRenderTargets(command_list *cmd, uint32_t count,
     if (effect_runtime *runtime = findRuntime(cmd->get_device()))
     {
       runtime->render_effects(cmd, previous, previous);
-      reshade::log::message(reshade::log::level::info,
-        "NRLive: rendered ReShade effects on the pre-FSR color target.");
+      if (!g_loggedPreFsr.exchange(true))
+        reshade::log::message(reshade::log::level::info,
+          "NRLive: rendered ReShade effects on the pre-FSR color target.");
     }
     else
     {
-      reshade::log::message(reshade::log::level::warning,
-        "NRLive: pre-FSR target found, but no matching ReShade runtime is available.");
+      if (!g_loggedMissingRuntime.exchange(true))
+        reshade::log::message(reshade::log::level::warning,
+          "NRLive: pre-FSR target found, but no matching ReShade runtime is available.");
     }
 
     // Ignore any transient render-target binds performed by the effects runtime.
