@@ -3,10 +3,11 @@
 #include <d3d12.h>
 #include <string>
 #include <mutex>
-#include <ffx_api/ffx_api.h>
-#include <ffx_api/ffx_upscale.h>
-#include <ffx_api/ffx_framegeneration.h>
-#include <ffx_api/dx12/ffx_api_dx12.h>
+#include <ffx_api.h>
+#include <ffx_upscale.h>
+#include <ffx_framegeneration.h>
+#include <dx12/ffx_api_dx12.h>
+#include <dx12/ffx_api_framegeneration_dx12.h>
 #include "graphics.h"
 
 class Fsr {
