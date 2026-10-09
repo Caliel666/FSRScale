@@ -44,7 +44,7 @@
                         </StackPanel>
                     </StackPanel>
                     <TextBlock Text="PROFILES" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,8"/>
-                    <ComboBox x:Name="ProfileBox" SelectionChanged="ProfileBox_SelectionChanged" Margin="0,0,0,8" Background="{StaticResource PanelBrush}" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}"/>
+                    <ComboBox x:Name="ProfileBox" SelectionChanged="ProfileBox_SelectionChanged" Margin="0,0,0,8"/>
                     <Button Content="Save profile" Click="SaveProfile_Click" HorizontalAlignment="Stretch"/>
                     <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,20,0,18"/>
                     <TextBlock Text="QUICK START" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,10"/>
@@ -92,7 +92,7 @@
                                 <StackPanel>
                                     <TextBlock Text="Target window" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,14"/>
                                     <TextBlock Text="Capture mode" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
-                                    <ComboBox x:Name="TargetModeBox" SelectedIndex="0" Margin="0,0,0,12" Background="{StaticResource PanelBrush}" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}">
+                                    <ComboBox x:Name="TargetModeBox" SelectedIndex="0" Margin="0,0,0,12">
                                         <ComboBoxItem Content="Picker countdown"/>
                                         <ComboBoxItem Content="Foreground window"/>
                                         <ComboBoxItem Content="Process ID"/>
@@ -118,7 +118,7 @@
                                 <StackPanel>
                                     <TextBlock Text="Motion vectors" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,5"/>
                                     <TextBlock Text="FastMV is the default low-overhead path. AMDOF remains available." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,12"/>
-                                    <ComboBox x:Name="MotionBox" SelectedIndex="0" Background="{StaticResource PanelBrush}" Foreground="{StaticResource TextBrush}" BorderBrush="{StaticResource BorderBrush}">
+                                    <ComboBox x:Name="MotionBox" SelectedIndex="0">
                                         <ComboBoxItem Content="FastMV (default)"/>
                                         <ComboBoxItem Content="AMDOF optical flow"/>
                                     </ComboBox>
