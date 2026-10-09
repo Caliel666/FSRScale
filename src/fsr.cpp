@@ -1,5 +1,6 @@
 #include "fsr.h"
 #include "graphics.h"
+#include <algorithm>
 #include <ffx_api_loader.h>
 #include <cfloat>
 #include <mutex>
@@ -182,8 +183,8 @@ void Fsr::setQuality(int quality)
 
 void Fsr::setSharpening(bool on, float amount)
 {
-  m_sharpen = on;
-  m_sharpness = amount;
+  m_sharpness = std::clamp(amount, 0.0f, 1.0f);
+  m_sharpen = on && m_sharpness > 0.0f;
 }
 
 static FfxApiResource apiRes(ID3D12Resource* r, uint32_t state)
@@ -229,7 +230,9 @@ bool Fsr::dispatch(ID3D12GraphicsCommandList* cmd,
   d.cameraFar = 1000.f;
   d.cameraFovAngleVertical = 1.0f;
   d.viewSpaceToMetersFactor = 1.f;
-  d.sharpness = m_sharpen ? m_sharpness : 0.f;
+  // FSR 3.1 has a separate enable switch; setting sharpness alone is not enough.
+  d.enableSharpening = m_sharpen && m_sharpness > 0.0f;
+  d.sharpness = d.enableSharpening ? m_sharpness : 0.0f;
   d.flags = 0;
 
   ffxReturnCode_t rc = g_ffx.Dispatch(&m_ctx, &d.header);

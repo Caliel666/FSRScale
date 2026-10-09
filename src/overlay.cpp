@@ -26,9 +26,9 @@ static constexpr COLORREF C_CARD2    = RGB(30,30,33);     // #1E1E21
 static constexpr COLORREF C_HOVER    = RGB(63,63,70);      // #3F3F46
 static constexpr COLORREF C_INPUT    = RGB(38,38,44);      // #26262C
 static constexpr COLORREF C_GHOST    = RGB(42,42,46);      // #2A2A2E
-static constexpr COLORREF C_RED      = RGB(220,38,38);     // #DC2626
-static constexpr COLORREF C_RED_HOT   = RGB(239,68,68);     // #EF4444
-static constexpr COLORREF C_RED_TINT = RGB(58,44,47);      // #3A2C2F
+static constexpr COLORREF C_RED      = RGB(181,108,255);   // launcher purple #B56CFF
+static constexpr COLORREF C_RED_HOT   = RGB(201,149,255);   // lighter purple hover
+static constexpr COLORREF C_RED_TINT = RGB(57,45,69);      // muted purple panel
 static constexpr COLORREF C_GREEN    = RGB(34,197,94);     // #22C55E
 static constexpr COLORREF C_TEXT     = RGB(232,232,232);   // #E8E8E8
 static constexpr COLORREF C_DIM      = RGB(139,139,139);   // #8B8B8B
@@ -49,8 +49,10 @@ static bool g_toggleFsr = false, g_screenshot = false, g_toggleFrameLimit = fals
 static OverlayFrameLimitConfig g_frameLimit{};
 static bool g_fgEnabled = false;
 static bool g_fgActive = false;
+static float g_sharpness = 0.65f;
 static OverlayHudConfig g_cfg{};
 static std::wstring g_shotPath;
+static std::wstring g_saveStatus = L"Changes are saved automatically";
 static float g_lastFps = 0, g_lastMs = 0;
 static float g_smoothFps = 0, g_smoothMs = 0;
 static std::deque<float> g_frameSamples;
@@ -76,6 +78,7 @@ static void loadCfg() {
   g_frameLimit.fps = frame_limit::clampFps(GetPrivateProfileIntW(L"FrameLimiter", L"fps", 60, ini.c_str()));
   g_frameLimit.method = frame_limit::normalizeMethod(GetPrivateProfileIntW(L"FrameLimiter", L"method", 0, ini.c_str()));
   g_fgEnabled = GetPrivateProfileIntW(L"FrameGeneration", L"enabled", 0, ini.c_str()) != 0;
+  g_sharpness = std::clamp(GetPrivateProfileIntW(L"FSR", L"sharpness", 65, ini.c_str()) / 100.0f, 0.0f, 1.0f);
   g_cfg.fps = GetPrivateProfileIntW(L"FPS", L"fps", 1, ini.c_str()) != 0;
   g_cfg.frametime = GetPrivateProfileIntW(L"FPS", L"frametime", 1, ini.c_str()) != 0;
   g_cfg.frame_timing = GetPrivateProfileIntW(L"FPS", L"frame_timing", 1, ini.c_str()) != 0;
@@ -112,6 +115,8 @@ static void saveCfg() {
   swprintf_s(limitValue, L"%d", g_frameLimit.fps); WritePrivateProfileStringW(L"FrameLimiter", L"fps", limitValue, ini.c_str());
   swprintf_s(limitValue, L"%d", g_frameLimit.method); WritePrivateProfileStringW(L"FrameLimiter", L"method", limitValue, ini.c_str());
   WritePrivateProfileStringW(L"FrameGeneration", L"enabled", g_fgEnabled ? L"1" : L"0", ini.c_str());
+  wchar_t sharpnessValue[16]{}; swprintf_s(sharpnessValue, L"%d", (int)std::lround(g_sharpness * 100.0f));
+  WritePrivateProfileStringW(L"FSR", L"sharpness", sharpnessValue, ini.c_str());
 }
 
 // ── GDI helpers ───────────────────────────────────────────────────────────
@@ -377,16 +382,19 @@ static void paintSettings(HWND h, HDC dc) {
   auto section=[&](const wchar_t* s,int y){HFONT f=makeFont(12,true);auto o=(HFONT)SelectObject(dc,f);SetTextColor(dc,C_RED);RECT r{24,y,rc.right-24,y+18};DrawTextW(dc,s,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);HPEN p=CreatePen(PS_SOLID,1,C_CARD2);auto op=(HPEN)SelectObject(dc,p);MoveToEx(dc,24,y+21,nullptr);LineTo(dc,rc.right-24,y+21);SelectObject(dc,op);DeleteObject(p);SelectObject(dc,o);DeleteObject(f);};
   section(L"FPS OVERLAY",58);
   section(L"APPEARANCE",148);
-  section(L"FRAME LIMITER",278);
-  section(L"SCREENSHOT",350);
+  section(L"FSR SHARPENING",278);
+  section(L"FRAME LIMITER",352);
+  section(L"SCREENSHOT",424);
   // Slider labels/values are painted here; the native trackbars remain for interaction.
   drawText(dc,L"Font size",24,176,13,C_TEXT,false);
   drawText(dc,L"Bg alpha",24,212,13,C_TEXT,false);
   drawText(dc,L"Engine",24,248,12,C_DIM,false); drawText(dc,L"Text",130,248,12,C_DIM,false); drawText(dc,L"Graph",224,248,12,C_DIM,false);
   auto swatch=[&](int x,COLORREF col){HBRUSH br=CreateSolidBrush(col);RECT r{x,246,x+40,268};FillRect(dc,&r,br);DeleteObject(br);HPEN p=CreatePen(PS_SOLID,1,C_HOVER);auto op=(HPEN)SelectObject(dc,p);auto ob=(HBRUSH)SelectObject(dc,GetStockObject(NULL_BRUSH));Rectangle(dc,r.left,r.top,r.right,r.bottom);SelectObject(dc,ob);SelectObject(dc,op);DeleteObject(p);};
   swatch(80,g_cfg.engine_color);swatch(174,g_cfg.text_color);swatch(268,g_cfg.frametime_color);
-  drawText(dc,L"Cap FPS",142,304,13,C_TEXT,false);
-  drawText(dc,L"Folder",24,366,13,C_TEXT,false); drawText(dc,L"Saved to scaleconfig.ini",24,490,10,C_MUTED,false);
+  drawText(dc,L"Sharpening",24,304,13,C_TEXT,false);
+  wchar_t sharp[16]{}; swprintf_s(sharp, L"%.2f", g_sharpness); drawText(dc,sharp,410,304,13,C_RED_HOT,false);
+  drawText(dc,L"Cap FPS",142,378,13,C_TEXT,false);
+  drawText(dc,L"Folder",24,440,13,C_TEXT,false); drawText(dc,g_saveStatus.c_str(),24,564,10,C_MUTED,false);
 }
 
 static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -410,7 +418,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           else { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
             wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
             SendMessageW(GetDlgItem(g_settings, 207), CB_SETCURSEL, g_frameLimit.method, 0);
-            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-540)/2, 480, 540, SWP_NOACTIVATE|SWP_SHOWWINDOW);
+            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-620)/2, 480, 620, SWP_NOACTIVATE|SWP_SHOWWINDOW);
             InvalidateRect(g_settings, nullptr, TRUE); } }
         InvalidateRect(h, nullptr, FALSE); UpdateWindow(h); return 0;
       }
@@ -462,6 +470,15 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       case 104: drawOwnerButton(dis, L"Resolution", g_cfg.resolution); return TRUE;
       case 105: drawOwnerButton(dis, L"Background", g_cfg.background); return TRUE;
       case 106: drawOwnerButton(dis, L"Enabled", g_frameLimit.enabled); return TRUE;
+      case 205: {
+        HDC dc = dis->hDC; RECT r = dis->rcItem;
+        HBRUSH bg = CreateSolidBrush(C_RED); FillRect(dc, &r, bg); DeleteObject(bg);
+        SetBkMode(dc, TRANSPARENT); SetTextColor(dc, C_DARK);
+        HFONT font = makeFont(12, true); HFONT prior = (HFONT)SelectObject(dc, font);
+        DrawTextW(dc, L"Save settings", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(dc, prior); DeleteObject(font);
+        return TRUE;
+      }
     }
   }
   // Theme native controls — dark backgrounds for statics, edits, buttons
@@ -499,6 +516,12 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return HTCLIENT;
   }
   if (m == WM_COMMAND) {
+    if (LOWORD(w) == 205 && HIWORD(w) == BN_CLICKED) {
+      saveCfg();
+      g_saveStatus = L"Saved to scaleconfig.ini";
+      InvalidateRect(h, nullptr, FALSE);
+      return 0;
+    }
     if (LOWORD(w) >= 101 && LOWORD(w) <= 106) {
       // These are BS_OWNERDRAW controls, so Windows does not maintain a
       // checkbox state for us. Toggle our actual config state directly.
@@ -548,7 +571,12 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   if (m == WM_HSCROLL) {
     HWND ctrl = (HWND)l;
-    if (ctrl == GetDlgItem(h, 201)) {
+    if (ctrl == GetDlgItem(h, 208)) {
+      g_sharpness = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
+      SetWindowTextW(GetDlgItem(h, 303), sharpText);
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 201)) {
       g_cfg.fontSize = (int)SendMessageW(ctrl, TBM_GETPOS, 0, 0);
       wchar_t b[8]; swprintf_s(b, L"%d", g_cfg.fontSize);
       SetWindowTextW(GetDlgItem(h, 301), b); saveCfg(); updateFpsPos();
@@ -583,7 +611,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   // Settings panel
   { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
     g_settings = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, SET_CLS, L"",
-      WS_POPUP, (sw-480)/2, (sh-540)/2, 480, 540, nullptr, nullptr, inst, nullptr); }
+      WS_POPUP, (sw-480)/2, (sh-620)/2, 480, 620, nullptr, nullptr, inst, nullptr); }
 
   if (g_settings) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 84, 80, 22, g_settings, (HMENU)101, inst, nullptr);
@@ -607,19 +635,27 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 174, 246, 40, 22, g_settings, (HMENU)402, inst, nullptr);
     CreateWindowW(L"STATIC", L"Graph:", WS_CHILD|WS_VISIBLE|SS_LEFT, 224, 250, 40, 18, g_settings, nullptr, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 268, 246, 40, 22, g_settings, (HMENU)403, inst, nullptr);
-    // SCREENSHOT section
-    CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 302, 100, 22, g_settings, (HMENU)106, inst, nullptr);
-     CreateWindowW(L"STATIC", L"Cap FPS", WS_CHILD|WS_VISIBLE|SS_LEFT, 142, 304, 52, 18, g_settings, nullptr, inst, nullptr);
-     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD|WS_VISIBLE|ES_NUMBER|ES_AUTOHSCROLL, 196, 300, 58, 24, g_settings, (HMENU)206, inst, nullptr);
-     HWND methodBox = CreateWindowW(L"COMBOBOX", L"", WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL, 266, 300, 188, 120, g_settings, (HMENU)207, inst, nullptr);
+    // FSR sharpening slider belongs to overlay settings.
+    CreateWindowW(L"STATIC", L"Sharpening amount", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 306, 130, 18, g_settings, nullptr, inst, nullptr);
+    wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
+    CreateWindowW(L"STATIC", sharpText, WS_CHILD|WS_VISIBLE|SS_LEFT, 410, 306, 40, 18, g_settings, (HMENU)303, inst, nullptr);
+    CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|WS_VISIBLE|TBS_NOTICKS|TBS_AUTOTICKS, 24, 326, 430, 26, g_settings, (HMENU)208, inst, nullptr);
+    SendMessageW(GetDlgItem(g_settings, 208), TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+    SendMessageW(GetDlgItem(g_settings, 208), TBM_SETPOS, TRUE, (int)std::lround(g_sharpness * 100.0f));
+    // Frame limiter controls
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 376, 100, 22, g_settings, (HMENU)106, inst, nullptr);
+     CreateWindowW(L"STATIC", L"Cap FPS", WS_CHILD|WS_VISIBLE|SS_LEFT, 142, 378, 52, 18, g_settings, nullptr, inst, nullptr);
+     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD|WS_VISIBLE|ES_NUMBER|ES_AUTOHSCROLL, 196, 374, 58, 24, g_settings, (HMENU)206, inst, nullptr);
+     HWND methodBox = CreateWindowW(L"COMBOBOX", L"", WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL, 266, 374, 188, 120, g_settings, (HMENU)207, inst, nullptr);
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Early - smoother");
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Late - snappier");
      SendMessageW(methodBox, CB_SETCURSEL, g_frameLimit.method, 0);
      wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
-     CreateWindowW(L"STATIC", L"Folder:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 366, 60, 18, g_settings, nullptr, inst, nullptr);
+     CreateWindowW(L"STATIC", L"Folder:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 440, 60, 18, g_settings, nullptr, inst, nullptr);
     g_pathEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_shotPath.c_str(),
-      WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 388, 340, 24, g_settings, (HMENU)203, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 388, 80, 24, g_settings, (HMENU)204, inst, nullptr);
+      WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 462, 340, 24, g_settings, (HMENU)203, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 462, 80, 24, g_settings, (HMENU)204, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)205, inst, nullptr);
     CheckDlgButton(g_settings, 101, g_cfg.fps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 102, g_cfg.frametime ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 103, g_cfg.frame_timing ? BST_CHECKED : BST_UNCHECKED);
@@ -719,6 +755,7 @@ bool overlayConsumeFsrToggle() { bool v = g_toggleFsr; g_toggleFsr = false; retu
 bool overlayConsumeScreenshot() { bool v = g_screenshot; g_screenshot = false; return v; }
 bool overlayConsumeFrameLimitToggle() { bool v = g_toggleFrameLimit; g_toggleFrameLimit = false; return v; }
 OverlayFrameLimitConfig overlayFrameLimitConfig() { return g_frameLimit; }
+float overlaySharpness() { return g_sharpness; }
 bool overlayConsumeFgToggle() { bool v = g_toggleFg; g_toggleFg = false; return v; }
 bool overlayFgEnabled() { return g_fgEnabled; }
 void overlaySetFgEnabled(bool enabled) {

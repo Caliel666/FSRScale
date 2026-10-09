@@ -300,7 +300,8 @@ HWND runPicker(HINSTANCE inst, int seconds)
                                 x, y, w, h, nullptr, nullptr, inst, nullptr);
     if (!hwnd) return nullptr;
 
-    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    // The launcher owns the visible countdown. Keep this window hidden while
+    // silently tracking the foreground target so NRLive itself shows no picker HUD.
     SetTimer(hwnd, 1, 100, nullptr);
 
     MSG msg{};
@@ -336,7 +337,7 @@ std::wstring targetUsage()
 {
     return
         L"NRLive - capture and upscale a window with FSR 3\n\n"
-        L"  NRLive.exe                    picker, 5 s countdown\n"
+        L"  NRLive.exe                    picker, hidden launcher countdown\n"
         L"  NRLive.exe -pid <id>          capture the window owned by PID\n"
         L"  NRLive.exe -pname <regex>     capture a process whose name matches regex\n"
         L"  NRLive.exe -window <regex>    capture a window title matching regex\n"
@@ -344,7 +345,7 @@ std::wstring targetUsage()
         L"  NRLive.exe -delay <sec>       wait before starting capture\n"
         L"  NRLive.exe -nooverlay         disable the NRLive HUD overlay\n"
         L"  NRLive.exe --key ctrl+shift+a set the global stop hotkey\n"
-        L"  NRLive.exe --mv amdof|fast    select motion-vector implementation\n"
+        L"  NRLive.exe --mv amdof|fast    select motion-vector implementation (default: fast)\n"
         L"  NRLive.exe --bindbypass home,insert,end,pageup,pagedown\n"
         L"                                  OptiScaler/ReShade menu keys (not sent to game).\n"
         L"                                  Default: Home,Insert,End,PageUp,PageDown.\n"
