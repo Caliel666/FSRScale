@@ -243,7 +243,7 @@ bool Graphics::buildSwapChain(Size display)
   m_rtvStride = m_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
   m_rtvBase = m_rtv->GetCPUDescriptorHandleForHeapStart();
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) {
     m_back[i].Reset();
     hr(m_swap->GetBuffer(i, IID_PPV_ARGS(&m_back[i])));
     auto h = m_rtvBase; h.ptr += (SIZE_T)i * m_rtvStride;
@@ -279,7 +279,7 @@ bool Graphics::adoptSwapChain(IDXGISwapChain4* wrapped)
   m_swap = wrapped;
   if (FAILED(m_swap.As(&m_swap1))) return false;
   m_index = m_swap->GetCurrentBackBufferIndex();
-  for (UINT i = 0; i < 3; ++i) {
+  for (UINT i = 0; i < 2; ++i) {
     if (FAILED(m_swap->GetBuffer(i, IID_PPV_ARGS(&m_back[i]))))
       return false;
     auto h = m_rtvBase;
@@ -514,7 +514,7 @@ bool Graphics::present()
 
   // A screenshot is synchronized only on the frame that requested it.
   // This guarantees the PNG contains the post-FSR backbuffer while normal
-  // frames retain the existing 3-buffered, non-blocking path.
+  // frames retain the existing buffered, non-blocking path.
   if (m_screenshotPending) {
     if (m_fence->GetCompletedValue() < v) {
       m_fence->SetEventOnCompletion(v, m_fenceEvent);
@@ -540,7 +540,7 @@ bool Graphics::present()
     m_screenshotFrame = 0;
   }
 
-  const UINT bufCount = 3; // match swap chain BufferCount
+  const UINT bufCount = 2; // match swap chain BufferCount
   if (m_fenceValue >= bufCount) {
     const uint64_t waitFor = m_fenceValue - (bufCount - 1);
     if (m_fence->GetCompletedValue() < waitFor) {
