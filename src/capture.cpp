@@ -2,6 +2,7 @@
 #include <wincodec.h>
 #include <shlobj.h>
 #include <windows.graphics.capture.interop.h>
+#include <dwmapi.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <DispatcherQueue.h>
 #include <algorithm>
@@ -12,6 +13,18 @@ using namespace winrt;
 using namespace winrt::Windows::Graphics::Capture;
 using namespace winrt::Windows::Graphics::DirectX;
 using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
+
+namespace {
+class PerMonitorDpiScope {
+public:
+  PerMonitorDpiScope() : m_previous(SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {}
+  ~PerMonitorDpiScope() { if (m_previous) SetThreadDpiAwarenessContext(m_previous); }
+  PerMonitorDpiScope(const PerMonitorDpiScope&) = delete;
+  PerMonitorDpiScope& operator=(const PerMonitorDpiScope&) = delete;
+private:
+  DPI_AWARENESS_CONTEXT m_previous;
+};
+}
 
 static std::wstring hex(HRESULT hr)
 {
@@ -159,6 +172,9 @@ bool Capture::start(HWND hwnd, CaptureMode mode)
 
 bool Capture::startDxgi(HWND hwnd)
 {
+  // Desktop Duplication coordinates are physical pixels. Keep all HWND and
+  // monitor geometry queries in the same per-monitor-aware coordinate space.
+  PerMonitorDpiScope dpiScope;
   stop();
   m_hwnd = hwnd;
   m_dxgiMode = true;
@@ -306,45 +322,66 @@ bool Capture::startWgc(HWND hwnd)
 // degrades to a full-frame CopySubresourceRegion (same as before).
 void Capture::recomputeClientArea(HWND hwnd)
 {
+  PerMonitorDpiScope dpiScope;
   m_clientOffsetX = 0;
   m_clientOffsetY = 0;
   m_size = m_windowSize;
   if (!hwnd || !IsWindow(hwnd) || m_windowSize.w == 0 || m_windowSize.h == 0)
     return;
 
-  RECT clientRect{}, windowRect{};
-  if (!GetClientRect(hwnd, &clientRect) || !GetWindowRect(hwnd, &windowRect))
+  RECT clientRect{}, frameRect{};
+  if (!GetClientRect(hwnd, &clientRect))
     return;
+
+  // GetWindowRect includes invisible resize borders on modern Windows. WGC
+  // captures the visible window frame, so map the client area against DWM's
+  // visible bounds instead of that larger, invisible rectangle.
+  if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                   &frameRect, sizeof(frameRect)))) {
+    if (!GetWindowRect(hwnd, &frameRect))
+      return;
+  }
 
   const int cw = std::max(1L, clientRect.right - clientRect.left);
   const int ch = std::max(1L, clientRect.bottom - clientRect.top);
+  const int fw = std::max(1L, frameRect.right - frameRect.left);
+  const int fh = std::max(1L, frameRect.bottom - frameRect.top);
   const double frameAspect = double(m_windowSize.w) / double(m_windowSize.h);
   const double clientAspect = double(cw) / double(ch);
-  const int ww = std::max(1L, windowRect.right - windowRect.left);
-  const int wh = std::max(1L, windowRect.bottom - windowRect.top);
-  const double windowAspect = double(ww) / double(wh);
-  const bool matchesClient = std::abs(frameAspect / clientAspect - 1.0) < 0.02;
-  const bool matchesWindow = std::abs(frameAspect / windowAspect - 1.0) < 0.02;
+  const double visibleFrameAspect = double(fw) / double(fh);
 
-  // A WGC frame can already be client-sized. Preserve that whole frame rather
-  // than cropping it a second time; also preserve true borderless fullscreen,
-  // where client and outer-window geometry are effectively identical.
-  if (matchesClient && (!matchesWindow || std::abs(clientAspect / windowAspect - 1.0) < 0.02))
+  // CreateForWindow can already return a client-only texture on some Windows
+  // versions / window types. Only crop when the captured texture's aspect
+  // matches the visible outer frame but not the client area; otherwise a
+  // second crop trims actual game pixels along the bottom or sides.
+  const bool matchesClient = std::abs(frameAspect / clientAspect - 1.0) < 0.005;
+  const bool matchesVisibleFrame = std::abs(frameAspect / visibleFrameAspect - 1.0) < 0.005;
+  if (matchesClient || !matchesVisibleFrame)
     return;
 
-  POINT pt{0, 0};
-  ClientToScreen(hwnd, &pt);
-  const double sx = double(m_windowSize.w) / double(ww);
-  const double sy = double(m_windowSize.h) / double(wh);
-  const int ox = pt.x - windowRect.left;
-  const int oy = pt.y - windowRect.top;
-  m_clientOffsetX = (UINT)std::clamp((int)std::lround(ox * sx), 0, (int)m_windowSize.w - 1);
-  m_clientOffsetY = (UINT)std::clamp((int)std::lround(oy * sy), 0, (int)m_windowSize.h - 1);
-  const UINT maxW = m_windowSize.w - m_clientOffsetX;
-  const UINT maxH = m_windowSize.h - m_clientOffsetY;
-  const UINT clientW = (UINT)std::clamp((int)std::lround(cw * sx), 1, (int)maxW);
-  const UINT clientH = (UINT)std::clamp((int)std::lround(ch * sy), 1, (int)maxH);
-  m_size = {clientW, clientH};
+  POINT clientOrigin{0, 0};
+  if (!ClientToScreen(hwnd, &clientOrigin))
+    return;
+
+  const double sx = double(m_windowSize.w) / double(fw);
+  const double sy = double(m_windowSize.h) / double(fh);
+  const int ox = clientOrigin.x - frameRect.left;
+  const int oy = clientOrigin.y - frameRect.top;
+  const int offsetX = (int)std::lround(ox * sx);
+  const int offsetY = (int)std::lround(oy * sy);
+  const int rightInset = (int)std::lround((frameRect.right -
+    (clientOrigin.x + cw)) * sx);
+  const int bottomInset = (int)std::lround((frameRect.bottom -
+    (clientOrigin.y + ch)) * sy);
+
+  m_clientOffsetX = (UINT)std::clamp(offsetX, 0, (int)m_windowSize.w - 1);
+  m_clientOffsetY = (UINT)std::clamp(offsetY, 0, (int)m_windowSize.h - 1);
+  const int clientW = (int)m_windowSize.w - (int)m_clientOffsetX -
+    std::max(0, rightInset);
+  const int clientH = (int)m_windowSize.h - (int)m_clientOffsetY -
+    std::max(0, bottomInset);
+  if (clientW > 0 && clientH > 0)
+    m_size = {(uint32_t)clientW, (uint32_t)clientH};
 }
 void Capture::waitForFrame(DWORD timeoutMs) const
 {
