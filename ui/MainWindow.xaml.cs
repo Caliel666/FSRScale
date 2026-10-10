@@ -36,7 +36,7 @@ public partial class MainWindow : Window
         public int delay { get; set; } = 5;
         public bool no_overlay { get; set; }
         public string motion { get; set; } = "fast";
-        public string capture_mode { get; set; } = "wgc";
+        public string capture_mode { get; set; } = "dxgi";
         public bool run_as_admin { get; set; } = true;
         public string scale_hotkey { get; set; } = "ctrl+alt+s";
         public string stop_key { get; set; } = "ctrl+shift+a";
@@ -121,7 +121,7 @@ public partial class MainWindow : Window
             DelayBox.Text = Math.Clamp(p.delay, 1, 30).ToString();
             HudCheckBox.IsChecked = !p.no_overlay;
             MotionBox.SelectedIndex = p.motion == "amdof" ? 1 : 0;
-            CaptureModeBox.SelectedIndex = p.capture_mode == "dxgi" ? 0 : 1;
+            CaptureModeBox.SelectedIndex = p.capture_mode == "wgc" ? 1 : 0;
             RunAsAdminCheckBox.IsChecked = p.run_as_admin;
             ScaleHotkeyBox.Text = p.scale_hotkey;
             StopHotkeyBox.Text = p.stop_key;
