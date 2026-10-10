@@ -192,8 +192,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     (uint32_t)std::max<LONG>(1, cr.right - cr.left),
     (uint32_t)std::max<LONG>(1, cr.bottom - cr.top)
   };
-  if (spec.captureMode == TargetSpec::CaptureMode::WgcDisplay)
-    render = display;
   setCaptureTarget(target);
   setScaleSizes(render, display);
 
@@ -215,9 +213,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
     Capture cap;
     const CaptureMode captureMode = spec.captureMode == TargetSpec::CaptureMode::WgcWindow
-      ? CaptureMode::WgcWindow
-      : (spec.captureMode == TargetSpec::CaptureMode::WgcDisplay
-          ? CaptureMode::WgcDisplay : CaptureMode::DxgiWindow);
+      ? CaptureMode::WgcWindow : CaptureMode::DxgiWindow;
     if (!cap.init(gfx.device(), gfx.queue()) || !cap.start(target, captureMode)) {
       std::wstring msg = L"Capture failed: " + cap.lastError();
       logMain(msg);
