@@ -24,11 +24,13 @@ using Microsoft::WRL::ComPtr;
 //  - pure D3D11 CopySubresourceRegion into our output texture
 //  - that texture is shared to D3D12 for FSR
 
+enum class CaptureMode { DxgiWindow, WgcWindow, DxgiDisplay };
+
 class Capture {
 public:
   bool init(ID3D12Device* d12, ID3D12CommandQueue* q);
   ~Capture();
-  bool start(HWND hwnd);
+  bool start(HWND hwnd, CaptureMode mode = CaptureMode::DxgiWindow);
   // Polls the frame pool (Magpie _Update). True when a new frame was copied.
   bool acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue);
   // Sleep until WGC reports a frame instead of busy-polling an empty frame pool.
@@ -42,6 +44,8 @@ public:
 
 private:
   bool createOutputTexture(Size size);
+  bool startWgc(HWND hwnd);
+  bool startDxgi(HWND hwnd, bool displayCapture);
   // Compute the client-area rect within the captured window and store it in
   // m_clientOffset / m_clientSize.  Called at start() and whenever the
   // captured frame size changes.  For a borderless fullscreen window the
@@ -56,6 +60,11 @@ private:
   ComPtr<ID3D12Device> m_d12;
   ComPtr<ID3D12CommandQueue> m_q;
 
+  ComPtr<IDXGIOutputDuplication> m_duplication;
+  bool m_dxgiMode = false;
+  bool m_displayCapture = false;
+  RECT m_monitorRect{};
+  RECT m_captureRect{};
   winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{ nullptr };
   winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool m_pool{ nullptr };
   winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session{ nullptr };
