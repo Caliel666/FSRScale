@@ -165,6 +165,7 @@ bool Capture::createOutputTexture(Size size)
 
 bool Capture::start(HWND hwnd, CaptureMode mode)
 {
+  m_dxgiCursorFallbackTried = false;
   if (mode == CaptureMode::WgcWindow)
     return startWgc(hwnd);
   return startDxgi(hwnd);
@@ -415,14 +416,20 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
     // texture (PointerPosition.Visible == false). Unlike WGC, DXGI has no
     // cursor-capture toggle, so don't feed those cursor pixels to the scaler:
     // release the desktop frame and switch to WGC's cursor-free capture path.
-    if (!frameInfo.PointerPosition.Visible) {
+    if (!frameInfo.PointerPosition.Visible && !m_dxgiCursorFallbackTried) {
       CURSORINFO cursorInfo{ sizeof(cursorInfo) };
       if (GetCursorInfo(&cursorInfo) && (cursorInfo.flags & CURSOR_SHOWING) && cursorInfo.hCursor) {
+        m_dxgiCursorFallbackTried = true;
         m_duplication->ReleaseFrame();
         HWND target = m_hwnd;
         if (startWgc(target))
           return false; // WGC's FrameArrived event will wake the next acquire.
-        m_error = L"DXGI embedded the system cursor and WGC fallback failed: " + m_error;
+
+        // If WGC cannot start for this target, keep capture alive in DXGI
+        // rather than leaving the main loop waiting forever for frames.
+        const std::wstring fallbackError = m_error;
+        if (startDxgi(target))
+          m_error = L"Cursor-safe WGC fallback failed; continuing with DXGI: " + fallbackError;
         return false;
       }
     }
