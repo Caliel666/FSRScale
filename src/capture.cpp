@@ -411,6 +411,22 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
       return false;
     }
 
+    // Desktop Duplication may bake a software cursor directly into the desktop
+    // texture (PointerPosition.Visible == false). Unlike WGC, DXGI has no
+    // cursor-capture toggle, so don't feed those cursor pixels to the scaler:
+    // release the desktop frame and switch to WGC's cursor-free capture path.
+    if (!frameInfo.PointerPosition.Visible) {
+      CURSORINFO cursorInfo{ sizeof(cursorInfo) };
+      if (GetCursorInfo(&cursorInfo) && (cursorInfo.flags & CURSOR_SHOWING) && cursorInfo.hCursor) {
+        m_duplication->ReleaseFrame();
+        HWND target = m_hwnd;
+        if (startWgc(target))
+          return false; // WGC's FrameArrived event will wake the next acquire.
+        m_error = L"DXGI embedded the system cursor and WGC fallback failed: " + m_error;
+        return false;
+      }
+    }
+
     ComPtr<ID3D11Texture2D> src;
     HRESULT query = desktopResource.As(&src);
     if (FAILED(query)) {
