@@ -30,7 +30,7 @@ class Capture {
 public:
   bool init(ID3D12Device* d12, ID3D12CommandQueue* q);
   ~Capture();
-  bool start(HWND hwnd, CaptureMode mode = CaptureMode::DxgiWindow);
+  bool start(HWND hwnd, CaptureMode mode = CaptureMode::WgcWindow);
   // Polls the frame pool (Magpie _Update). True when a new frame was copied.
   bool acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue);
   // Sleep until WGC reports a frame instead of busy-polling an empty frame pool.
