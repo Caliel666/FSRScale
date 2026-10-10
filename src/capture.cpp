@@ -386,9 +386,10 @@ void Capture::recomputeClientArea(HWND hwnd)
 void Capture::waitForFrame(DWORD timeoutMs) const
 {
   if (m_dxgiMode) {
-    // Desktop Duplication has no FrameArrived event. Do not Sleep(1): Windows
-    // timer granularity can turn it into a 1–15 ms stall. Yield cooperatively.
-    if (!SwitchToThread()) SleepEx(0, TRUE);
+    // Desktop Duplication has no FrameArrived event. AcquireNextFrame uses
+    // a short bounded wait; yield once here rather than spinning continuously
+    // and competing with the game and graphics driver.
+    SwitchToThread();
     return;
   }
   if (m_frameArrivedEvent)
@@ -403,7 +404,7 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
     if (!m_duplication) return false;
     DXGI_OUTDUPL_FRAME_INFO frameInfo{};
     ComPtr<IDXGIResource> desktopResource;
-    HRESULT acquired = m_duplication->AcquireNextFrame(0, &frameInfo, &desktopResource);
+    HRESULT acquired = m_duplication->AcquireNextFrame(1, &frameInfo, &desktopResource);
     if (acquired == DXGI_ERROR_WAIT_TIMEOUT) return false;
     if (FAILED(acquired)) {
       m_error = L"DXGI AcquireNextFrame 0x" + hex(acquired);
@@ -525,8 +526,15 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
   // NULL src box == full resource.  When the client area covers the entire
   // captured frame (fullscreen), CopySubresourceRegion with an explicit box
   // that covers everything is equivalent to CopyResource — no perf penalty.
-  m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0,
-                               src.Get(), 0, &srcBox);
+  if (m_clientOffsetX == 0 && m_clientOffsetY == 0 &&
+      m_size.w == td.Width && m_size.h == td.Height) {
+    // Preserve the fast full-resource copy path for borderless/full-frame
+    // capture; only use a boxed copy when a real crop is needed.
+    m_ctx->CopyResource(m_outD11.Get(), src.Get());
+  } else {
+    m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0,
+                                 src.Get(), 0, &srcBox);
+  }
 
   // Publish the copy to D3D12. A shared D3D11 fence is the fast path.
   // The old fallback only called Flush() and then signalled the fence from
