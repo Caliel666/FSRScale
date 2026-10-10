@@ -63,6 +63,7 @@ private:
 
   ComPtr<IDXGIOutputDuplication> m_duplication;
   bool m_dxgiMode = false;
+  bool m_dxgiCursorFallbackTried = false;
   RECT m_monitorRect{};
   RECT m_captureRect{};
   winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{ nullptr };
