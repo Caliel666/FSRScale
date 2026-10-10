@@ -24,7 +24,7 @@ using Microsoft::WRL::ComPtr;
 //  - pure D3D11 CopySubresourceRegion into our output texture
 //  - that texture is shared to D3D12 for FSR
 
-enum class CaptureMode { DxgiWindow, WgcWindow, WgcDisplay };
+enum class CaptureMode { DxgiWindow, WgcWindow };
 
 class Capture {
 public:
@@ -44,8 +44,8 @@ public:
 
 private:
   bool createOutputTexture(Size size);
-  bool startWgc(HWND hwnd, bool monitorCapture = false);
-  bool startDxgi(HWND hwnd, bool displayCapture);
+  bool startWgc(HWND hwnd);
+  bool startDxgi(HWND hwnd);
   // Compute the client-area rect within the captured window and store it in
   // m_clientOffset / m_clientSize.  Called at start() and whenever the
   // captured frame size changes.  For a borderless fullscreen window the
@@ -62,8 +62,6 @@ private:
 
   ComPtr<IDXGIOutputDuplication> m_duplication;
   bool m_dxgiMode = false;
-  bool m_displayCapture = false;
-  bool m_monitorCapture = false;
   RECT m_monitorRect{};
   RECT m_captureRect{};
   winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{ nullptr };
