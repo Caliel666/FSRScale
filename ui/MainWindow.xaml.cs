@@ -121,7 +121,7 @@ public partial class MainWindow : Window
             DelayBox.Text = Math.Clamp(p.delay, 1, 30).ToString();
             HudCheckBox.IsChecked = !p.no_overlay;
             MotionBox.SelectedIndex = p.motion == "amdof" ? 1 : 0;
-            CaptureModeBox.SelectedIndex = p.capture_mode == "wgc" ? 1 : 0;
+            CaptureModeBox.SelectedIndex = p.capture_mode == "dxgi" ? 0 : 1;
             RunAsAdminCheckBox.IsChecked = p.run_as_admin;
             ScaleHotkeyBox.Text = p.scale_hotkey;
             StopHotkeyBox.Text = p.stop_key;
