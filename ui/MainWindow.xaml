@@ -100,9 +100,9 @@
                                     <TextBlock Text="PID / process regex / window title" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
                                     <TextBox x:Name="TargetTextBox" Text="" ToolTip="Used for PID, process name, or window title modes" Margin="0,0,0,12"/>
                                     <TextBlock Text="Capture source" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
-                                    <ComboBox x:Name="CaptureModeBox" SelectedIndex="0" Margin="0,0,0,12" ToolTip="Choose between DXGI Desktop Duplication with window-region cropping and Windows Graphics Capture for the selected window">
-                                        <ComboBoxItem Content="DXGI Window (default)"/>
-                                        <ComboBoxItem Content="WGC Window"/>
+                                    <ComboBox x:Name="CaptureModeBox" SelectedIndex="0" Margin="0,0,0,12" ToolTip="Choose between Windows Graphics Capture and DXGI Desktop Duplication with window-region cropping">
+                                        <ComboBoxItem Content="WGC Window (default)"/>
+                                        <ComboBoxItem Content="DXGI Window"/>
                                     </ComboBox>
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions>
