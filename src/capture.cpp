@@ -418,10 +418,12 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
     // release the desktop frame and switch to WGC's cursor-free capture path.
     if (!frameInfo.PointerPosition.Visible && !m_dxgiCursorFallbackTried) {
       CURSORINFO cursorInfo{ sizeof(cursorInfo) };
+      POINT physicalCursor{};
       const bool cursorInCapturedRegion =
         GetCursorInfo(&cursorInfo) && (cursorInfo.flags & CURSOR_SHOWING) && cursorInfo.hCursor &&
-        cursorInfo.ptScreenPos.x >= m_captureRect.left && cursorInfo.ptScreenPos.x < m_captureRect.right &&
-        cursorInfo.ptScreenPos.y >= m_captureRect.top && cursorInfo.ptScreenPos.y < m_captureRect.bottom;
+        GetPhysicalCursorPos(&physicalCursor) &&
+        physicalCursor.x >= m_captureRect.left && physicalCursor.x < m_captureRect.right &&
+        physicalCursor.y >= m_captureRect.top && physicalCursor.y < m_captureRect.bottom;
       if (cursorInCapturedRegion) {
         m_dxgiCursorFallbackTried = true;
         m_duplication->ReleaseFrame();
