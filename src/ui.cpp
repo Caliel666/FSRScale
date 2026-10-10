@@ -268,7 +268,7 @@ static bool rebuildDrawnCursor(HCURSOR cursor)
   return true;
 }
 
-void drawCursor()
+void drawCursor(bool forceHideRealCursor)
 {
   HWND h = g_output;
   if (!h || !IsWindow(h)) return;
@@ -301,19 +301,28 @@ void drawCursor()
 
   CURSORINFO ci{};
   ci.cbSize = sizeof(ci);
-  if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
-    // The game hid its cursor.  Both the drawn cursor and the real cursor
-    // should be hidden.  Don't call showRealCursor() — the game already
-    // did ShowCursor(FALSE) and we don't want to fight it.
+  const bool cursorInfoValid = GetCursorInfo(&ci) != FALSE;
+  const bool cursorShowing = cursorInfoValid &&
+    (ci.flags & CURSOR_SHOWING) && ci.hCursor;
+
+  // DXGI Desktop Duplication can include the hardware pointer in the
+  // duplicated desktop image independently of WGC's cursor-capture setting.
+  // Keep the real pointer suppressed for the entire DXGI game-mode interval;
+  // the separate layered cursor window below is the only visible cursor.
+  if (forceHideRealCursor)
+    hideRealCursor();
+
+  if (!cursorShowing) {
+    // The game has hidden its cursor. In DXGI mode still suppress the desktop
+    // pointer plane, but don't draw a replacement cursor.
     hideDrawnCursor();
     return;
   }
 
-  // The game is showing its cursor.  Draw our mapped cursor AND hide the
-  // real system cursor so only the drawn one is visible.  When the game
-  // later hides its cursor, GetCursorInfo will report !CURSOR_SHOWING and
-  // we'll hide the drawn cursor too — both disappear together.
-  hideRealCursor();
+  // The game is showing its cursor. Draw our mapped cursor and suppress the
+  // real system cursor so only the transformed cursor is visible.
+  if (!forceHideRealCursor)
+    hideRealCursor();
 
   if (ci.hCursor != g_drawnCursor && !rebuildDrawnCursor(ci.hCursor)) {
     hideDrawnCursor();

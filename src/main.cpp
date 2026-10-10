@@ -159,6 +159,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
   HWND out = createOutput(inst, 1280, 720);
   if (!out) return 1;
+  // DXGI Desktop Duplication must not recursively capture NRLive's own
+  // fullscreen presentation window.
+  SetWindowDisplayAffinity(out, WDA_EXCLUDEFROMCAPTURE);
 
   constexpr int kStopId = 0x4653;
   bool hk = RegisterHotKey(nullptr, kStopId,
@@ -209,7 +212,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     logMain(L"Graphics::init OK");
 
     Capture cap;
-    if (!cap.init(gfx.device(), gfx.queue()) || !cap.start(target)) {
+    const CaptureMode captureMode = spec.captureMode == TargetSpec::CaptureMode::WgcWindow
+      ? CaptureMode::WgcWindow : CaptureMode::DxgiWindow;
+    if (!cap.init(gfx.device(), gfx.queue()) || !cap.start(target, captureMode)) {
       std::wstring msg = L"Capture failed: " + cap.lastError();
       logMain(msg);
       if (cliMode && hasConsole()) printCli(msg);
@@ -363,7 +368,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       // The output is fullscreen/topmost, so merely stopping frame acquisition
       // leaves it covering the application selected by Alt-Tab. Hide it on focus
-      // loss, stop WGC, then recreate the capture session on return. Overlay mode
+      // loss, stop capture, then recreate the capture session on return. Overlay mode
       // is exempt because interacting with it intentionally takes focus from game.
       auto isTargetForeground = [&]() {
         HWND fg = GetForegroundWindow();
@@ -398,7 +403,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         continue;
       }
       if (capturePausedForFocus) {
-        if (!cap.start(target)) {
+        if (!cap.start(target, captureMode)) {
           Sleep(8);
           continue;
         }
@@ -408,14 +413,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         capturePausedForFocus = false;
         reset = true;
         QueryPerformanceCounter(&lastCaptured);
-        continue; // let WGC deliver a fresh frame before rendering
+        continue; // let capture deliver a fresh frame before rendering
       }
 
       // Only transform/hide the system cursor while the scaled presentation
       // is active. Calling drawCursor before focus-state handling re-applied
       // ClipCursor and hid the real cursor on every soft-unscale polling loop,
       // immediately undoing releaseCursorClip() and trapping the user in NRLive.
-      drawCursor();
+      drawCursor(cap.usingDxgi());
 
       if (frameLimiter.enabled() && frameLimiter.method() == 0)
         frameLimiter.wait(); // early mode: pace before capture/CPU preparation
@@ -426,7 +431,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       LARGE_INTEGER acquireStart{}, acquireEnd{}, renderStart{}, renderEnd{};
       QueryPerformanceCounter(&acquireStart);
       if (!cap.acquire(color, cs, fenceVal)) {
-        // No new WGC frame yet — do not re-submit with stale resource states.
+        // No new capture frame yet — do not re-submit with stale resource states.
         // Wait for the FrameArrived event with a short timeout so stop/hotkey
         // polling remains responsive, while avoiding a busy loop that steals
         // CPU time from the game and graphics driver.

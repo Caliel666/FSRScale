@@ -15,6 +15,8 @@ struct TargetSpec {
   bool noOverlay = false;
   bool front = false;
   enum class MotionMode { AmdOf, Fast };
+  enum class CaptureMode { DxgiWindow, WgcWindow };
+  CaptureMode captureMode = CaptureMode::WgcWindow;
   MotionMode motionMode = MotionMode::Fast;
   std::wstring motionModeText = L"fast";
   // Optional CSV trace for comparing capture, render CPU, and present cadence.

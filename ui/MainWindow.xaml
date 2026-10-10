@@ -73,13 +73,14 @@
                 <StackPanel>
                     <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="18" Margin="0,0,0,14">
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="150"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="SCALING SESSION" Foreground="{StaticResource AccentBrush}" FontSize="10" FontWeight="SemiBold"/>
                                 <TextBlock Text="Ready when you are" FontSize="20" FontWeight="SemiBold" Margin="0,6,0,4"/>
                                 <TextBlock x:Name="StatusText" Text="Press Scale, then switch to the game before the countdown ends." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" MaxWidth="470"/>
                             </StackPanel>
-                            <Button x:Name="ScaleButton" Grid.Column="1" Content="Scale  →" Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" Foreground="#17131C" FontWeight="SemiBold" FontSize="15" Padding="18,14" VerticalAlignment="Center" Click="ScaleButton_Click"/>
+                            <CheckBox x:Name="RunAsAdminCheckBox" Grid.Column="1" Content="Run as admin" IsChecked="True" VerticalAlignment="Center" HorizontalAlignment="Center" ToolTip="Might be necessary for some games with anti cheat" Margin="8,0"/>
+                            <Button x:Name="ScaleButton" Grid.Column="2" Content="Scale  →" Background="{StaticResource AccentBrush}" BorderBrush="{StaticResource AccentBrush}" Foreground="#17131C" FontWeight="SemiBold" FontSize="15" Padding="18,14" VerticalAlignment="Center" Click="ScaleButton_Click"/>
                         </Grid>
                     </Border>
                     <Grid>
@@ -98,6 +99,11 @@
                                     </ComboBox>
                                     <TextBlock Text="PID / process regex / window title" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
                                     <TextBox x:Name="TargetTextBox" Text="" ToolTip="Used for PID, process name, or window title modes" Margin="0,0,0,12"/>
+                                    <TextBlock Text="Capture source" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
+                                    <ComboBox x:Name="CaptureModeBox" SelectedIndex="0" Margin="0,0,0,12" ToolTip="Choose between Windows Graphics Capture and DXGI Desktop Duplication with window-region cropping">
+                                        <ComboBoxItem Content="WGC Window (default)"/>
+                                        <ComboBoxItem Content="DXGI Window"/>
+                                    </ComboBox>
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions>
                                         <StackPanel>
@@ -127,11 +133,11 @@
                                 <StackPanel>
                                     <TextBlock Text="Hotkeys" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
                                     <TextBlock Text="Scale / Unscale toggle" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
-                                    <TextBox x:Name="ScaleHotkeyBox" Text="ctrl+alt+s" Margin="0,0,0,10" LostFocus="ScaleHotkeyBox_LostFocus"/>
+                                    <TextBox x:Name="ScaleHotkeyBox" Text="ctrl+alt+s" IsReadOnly="True" PreviewKeyDown="HotkeyBox_PreviewKeyDown" ToolTip="Click then press the key combination to register" Margin="0,0,0,10"/>
                                     <TextBlock Text="Force stop key" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
-                                    <TextBox x:Name="StopHotkeyBox" Text="ctrl+shift+a" Margin="0,0,0,10"/>
+                                    <TextBox x:Name="StopHotkeyBox" Text="ctrl+shift+a" IsReadOnly="True" PreviewKeyDown="HotkeyBox_PreviewKeyDown" ToolTip="Click then press the key combination to register" Margin="0,0,0,10"/>
                                     <TextBlock Text="Overlay toggle key" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,5"/>
-                                    <TextBox x:Name="OverlayHotkeyBox" Text="ctrl+home"/>
+                                    <TextBox x:Name="OverlayHotkeyBox" Text="ctrl+home" IsReadOnly="True" PreviewKeyDown="HotkeyBox_PreviewKeyDown" ToolTip="Click then press the key combination to register"/>
                                     <TextBlock Text="Passthrough keys (comma-separated)" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,10,0,5"/>
                                     <TextBox x:Name="BindBypassBox" Text="home,insert,end,pageup,pagedown" ToolTip="Keys sent to OptiScaler/ReShade instead of the game. Supports Space and modifiers, e.g. ctrl+space."/>
                                     <TextBlock Text="Hotkeys must not conflict. Passthrough keys are sent to OptiScaler / ReShade." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0"/>

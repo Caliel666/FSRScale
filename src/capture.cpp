@@ -2,15 +2,29 @@
 #include <wincodec.h>
 #include <shlobj.h>
 #include <windows.graphics.capture.interop.h>
+#include <dwmapi.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <DispatcherQueue.h>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 using namespace winrt;
 using namespace winrt::Windows::Graphics::Capture;
 using namespace winrt::Windows::Graphics::DirectX;
 using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
+
+namespace {
+class PerMonitorDpiScope {
+public:
+  PerMonitorDpiScope() : m_previous(SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {}
+  ~PerMonitorDpiScope() { if (m_previous) SetThreadDpiAwarenessContext(m_previous); }
+  PerMonitorDpiScope(const PerMonitorDpiScope&) = delete;
+  PerMonitorDpiScope& operator=(const PerMonitorDpiScope&) = delete;
+private:
+  DPI_AWARENESS_CONTEXT m_previous;
+};
+}
 
 static std::wstring hex(HRESULT hr)
 {
@@ -149,8 +163,91 @@ bool Capture::createOutputTexture(Size size)
   return true;
 }
 
-bool Capture::start(HWND hwnd)
+bool Capture::start(HWND hwnd, CaptureMode mode)
 {
+  m_dxgiCursorFallbackTried = false;
+  if (mode == CaptureMode::WgcWindow)
+    return startWgc(hwnd);
+  return startDxgi(hwnd);
+}
+
+bool Capture::startDxgi(HWND hwnd)
+{
+  // Desktop Duplication coordinates are physical pixels. Keep all HWND and
+  // monitor geometry queries in the same per-monitor-aware coordinate space.
+  PerMonitorDpiScope dpiScope;
+  stop();
+  m_hwnd = hwnd;
+  m_dxgiMode = true;
+  m_monitorRect = {};
+  m_captureRect = {};
+  if (!hwnd || !IsWindow(hwnd)) { m_error = L"Invalid target window"; return false; }
+
+  HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi{ sizeof(mi) };
+  if (!monitor || !GetMonitorInfoW(monitor, &mi)) {
+    m_error = L"Could not query target monitor";
+    return false;
+  }
+  m_monitorRect = mi.rcMonitor;
+
+  RECT client{};
+  POINT origin{0, 0};
+  if (!GetClientRect(hwnd, &client) || !ClientToScreen(hwnd, &origin)) {
+    m_error = L"Could not query target client area";
+    return false;
+  }
+  m_captureRect = {
+    origin.x, origin.y,
+    origin.x + (client.right - client.left),
+    origin.y + (client.bottom - client.top)
+  };
+  RECT clipped{};
+  if (!IntersectRect(&clipped, &m_captureRect, &m_monitorRect)) {
+    m_error = L"Target client area is outside the selected monitor";
+    return false;
+  }
+  m_captureRect = clipped;
+
+  const LONG width = m_captureRect.right - m_captureRect.left;
+  const LONG height = m_captureRect.bottom - m_captureRect.top;
+  if (width <= 0 || height <= 0) { m_error = L"Capture region has zero size"; return false; }
+  m_size = { (uint32_t)width, (uint32_t)height };
+  m_windowSize = m_size;
+
+  ComPtr<IDXGIDevice> dxgiDevice;
+  HRESULT h = m_d11.As(&dxgiDevice);
+  if (FAILED(h)) { m_error = L"Query IDXGIDevice 0x" + hex(h); return false; }
+  ComPtr<IDXGIAdapter> adapter;
+  h = dxgiDevice->GetAdapter(&adapter);
+  if (FAILED(h)) { m_error = L"IDXGIDevice::GetAdapter 0x" + hex(h); return false; }
+
+  bool foundOutput = false;
+  for (UINT i = 0; ; ++i) {
+    ComPtr<IDXGIOutput> output;
+    h = adapter->EnumOutputs(i, &output);
+    if (h == DXGI_ERROR_NOT_FOUND) break;
+    if (FAILED(h)) { m_error = L"IDXGIAdapter::EnumOutputs 0x" + hex(h); return false; }
+    DXGI_OUTPUT_DESC desc{};
+    if (FAILED(output->GetDesc(&desc))) continue;
+    if (desc.Monitor != monitor) continue;
+    ComPtr<IDXGIOutput1> output1;
+    h = output.As(&output1);
+    if (FAILED(h)) { m_error = L"Query IDXGIOutput1 0x" + hex(h); return false; }
+    h = output1->DuplicateOutput(m_d11.Get(), &m_duplication);
+    if (FAILED(h)) { m_error = L"DXGI DuplicateOutput 0x" + hex(h); return false; }
+    foundOutput = true;
+    break;
+  }
+  if (!foundOutput) { m_error = L"No DXGI output matches the target monitor"; return false; }
+  if (!createOutputTexture(m_size)) return false;
+  m_started = true;
+  return true;
+}
+
+bool Capture::startWgc(HWND hwnd)
+{
+  stop();
   if (m_frameArrivedEvent) { CloseHandle(m_frameArrivedEvent); m_frameArrivedEvent = nullptr; }
   m_frameArrivedEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   if (!m_frameArrivedEvent) { m_error = L"Failed to create WGC frame event"; return false; }
@@ -163,7 +260,8 @@ bool Capture::start(HWND hwnd)
     m_item = itemFromWindow(hwnd);
     auto itemSize = m_item.Size();
     if (itemSize.Width <= 0 || itemSize.Height <= 0) {
-      m_error = L"Window reports zero size"; return false;
+      m_error = L"Window reports zero size";
+      return false;
     }
     m_windowSize = { (uint32_t)itemSize.Width, (uint32_t)itemSize.Height };
     // Compute the client-area crop rect for this window so we can exclude
@@ -225,57 +323,177 @@ bool Capture::start(HWND hwnd)
 // degrades to a full-frame CopySubresourceRegion (same as before).
 void Capture::recomputeClientArea(HWND hwnd)
 {
-  if (!hwnd || !IsWindow(hwnd)) {
-    m_clientOffsetX = 0;
-    m_clientOffsetY = 0;
-    m_size = m_windowSize;
+  PerMonitorDpiScope dpiScope;
+  m_clientOffsetX = 0;
+  m_clientOffsetY = 0;
+  m_size = m_windowSize;
+  if (!hwnd || !IsWindow(hwnd) || m_windowSize.w == 0 || m_windowSize.h == 0)
     return;
+
+  RECT clientRect{}, frameRect{};
+  if (!GetClientRect(hwnd, &clientRect))
+    return;
+
+  // GetWindowRect includes invisible resize borders on modern Windows. WGC
+  // captures the visible window frame, so map the client area against DWM's
+  // visible bounds instead of that larger, invisible rectangle.
+  if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                   &frameRect, sizeof(frameRect)))) {
+    if (!GetWindowRect(hwnd, &frameRect))
+      return;
   }
 
-  RECT clientRect{};
-  RECT windowRect{};
-  if (!GetClientRect(hwnd, &clientRect) || !GetWindowRect(hwnd, &windowRect)) {
-    m_clientOffsetX = 0;
-    m_clientOffsetY = 0;
-    m_size = m_windowSize;
-    return;
-  }
-
-  POINT pt{ 0, 0 };
-  ClientToScreen(hwnd, &pt);
-
-  const int ww = std::max(1L, windowRect.right - windowRect.left);
-  const int wh = std::max(1L, windowRect.bottom - windowRect.top);
   const int cw = std::max(1L, clientRect.right - clientRect.left);
   const int ch = std::max(1L, clientRect.bottom - clientRect.top);
+  const int fw = std::max(1L, frameRect.right - frameRect.left);
+  const int fh = std::max(1L, frameRect.bottom - frameRect.top);
+  const double frameAspect = double(m_windowSize.w) / double(m_windowSize.h);
+  const double clientAspect = double(cw) / double(ch);
+  const double visibleFrameAspect = double(fw) / double(fh);
 
-  // WGC's GraphicsCaptureItem.Size is in the captured frame's physical pixels,
-  // while GetWindowRect/GetClientRect can be DPI-virtualized. Scale the HWND
-  // geometry into the actual WGC texture instead of assuming a 1:1 mapping.
-  const double sx = double(m_windowSize.w) / double(ww);
-  const double sy = double(m_windowSize.h) / double(wh);
-  const int ox = pt.x - windowRect.left;
-  const int oy = pt.y - windowRect.top;
+  // CreateForWindow can already return a client-only texture on some Windows
+  // versions / window types. Only crop when the captured texture's aspect
+  // matches the visible outer frame but not the client area; otherwise a
+  // second crop trims actual game pixels along the bottom or sides.
+  const bool matchesClient = std::abs(frameAspect / clientAspect - 1.0) < 0.005;
+  const bool matchesVisibleFrame = std::abs(frameAspect / visibleFrameAspect - 1.0) < 0.005;
+  if (matchesClient || !matchesVisibleFrame)
+    return;
 
-  m_clientOffsetX = (UINT)std::clamp((int)std::lround(ox * sx), 0, (int)m_windowSize.w - 1);
-  m_clientOffsetY = (UINT)std::clamp((int)std::lround(oy * sy), 0, (int)m_windowSize.h - 1);
+  POINT clientOrigin{0, 0};
+  if (!ClientToScreen(hwnd, &clientOrigin))
+    return;
 
-  const UINT maxW = m_windowSize.w - m_clientOffsetX;
-  const UINT maxH = m_windowSize.h - m_clientOffsetY;
-  const UINT clientW = (UINT)std::clamp((int)std::lround(cw * sx), 1, (int)maxW);
-  const UINT clientH = (UINT)std::clamp((int)std::lround(ch * sy), 1, (int)maxH);
-  m_size = { clientW, clientH };
+  const double sx = double(m_windowSize.w) / double(fw);
+  const double sy = double(m_windowSize.h) / double(fh);
+  const int ox = clientOrigin.x - frameRect.left;
+  const int oy = clientOrigin.y - frameRect.top;
+  const int offsetX = (int)std::lround(ox * sx);
+  const int offsetY = (int)std::lround(oy * sy);
+  const int rightInset = (int)std::lround((frameRect.right -
+    (clientOrigin.x + cw)) * sx);
+  const int bottomInset = (int)std::lround((frameRect.bottom -
+    (clientOrigin.y + ch)) * sy);
+
+  m_clientOffsetX = (UINT)std::clamp(offsetX, 0, (int)m_windowSize.w - 1);
+  m_clientOffsetY = (UINT)std::clamp(offsetY, 0, (int)m_windowSize.h - 1);
+  const int clientW = (int)m_windowSize.w - (int)m_clientOffsetX -
+    std::max(0, rightInset);
+  const int clientH = (int)m_windowSize.h - (int)m_clientOffsetY -
+    std::max(0, bottomInset);
+  if (clientW > 0 && clientH > 0)
+    m_size = {(uint32_t)clientW, (uint32_t)clientH};
 }
-
 void Capture::waitForFrame(DWORD timeoutMs) const
 {
+  if (m_dxgiMode) {
+    // Desktop Duplication has no FrameArrived event. AcquireNextFrame uses
+    // a short bounded wait; yield once here rather than spinning continuously
+    // and competing with the game and graphics driver.
+    SwitchToThread();
+    return;
+  }
   if (m_frameArrivedEvent)
     WaitForSingleObject(m_frameArrivedEvent, timeoutMs);
 }
 
 bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue)
 {
-  if (!m_started || !m_pool) return false;
+  if (!m_started) return false;
+
+  if (m_dxgiMode) {
+    if (!m_duplication) return false;
+    DXGI_OUTDUPL_FRAME_INFO frameInfo{};
+    ComPtr<IDXGIResource> desktopResource;
+    HRESULT acquired = m_duplication->AcquireNextFrame(1, &frameInfo, &desktopResource);
+    if (acquired == DXGI_ERROR_WAIT_TIMEOUT) return false;
+    if (FAILED(acquired)) {
+      m_error = L"DXGI AcquireNextFrame 0x" + hex(acquired);
+      return false;
+    }
+
+    // DXGI Desktop Duplication has no cursor-capture toggle: depending on the
+    // driver, the pointer may be baked into the desktop texture or overlaid
+    // separately. If the visible system cursor overlaps the target region,
+    // switch to WGC, which can explicitly exclude cursor pixels from capture.
+    if (!m_dxgiCursorFallbackTried) {
+      CURSORINFO cursorInfo{ sizeof(cursorInfo) };
+      POINT physicalCursor{};
+      const bool cursorInCapturedRegion =
+        GetCursorInfo(&cursorInfo) && (cursorInfo.flags & CURSOR_SHOWING) && cursorInfo.hCursor &&
+        GetPhysicalCursorPos(&physicalCursor) &&
+        physicalCursor.x >= m_captureRect.left && physicalCursor.x < m_captureRect.right &&
+        physicalCursor.y >= m_captureRect.top && physicalCursor.y < m_captureRect.bottom;
+      if (cursorInCapturedRegion) {
+        m_dxgiCursorFallbackTried = true;
+        m_duplication->ReleaseFrame();
+        HWND target = m_hwnd;
+        if (startWgc(target))
+          return false; // WGC's FrameArrived event will wake the next acquire.
+
+        // If WGC cannot start for this target, keep capture alive in DXGI
+        // rather than leaving the main loop waiting forever for frames.
+        const std::wstring fallbackError = m_error;
+        if (startDxgi(target))
+          m_error = L"Cursor-safe WGC fallback failed; continuing with DXGI: " + fallbackError;
+        return false;
+      }
+    }
+
+    ComPtr<ID3D11Texture2D> src;
+    HRESULT query = desktopResource.As(&src);
+    if (FAILED(query)) {
+      m_duplication->ReleaseFrame();
+      m_error = L"DXGI desktop texture query 0x" + hex(query);
+      return false;
+    }
+
+    D3D11_BOX srcBox{};
+    srcBox.left = (UINT)(m_captureRect.left - m_monitorRect.left);
+    srcBox.top = (UINT)(m_captureRect.top - m_monitorRect.top);
+    srcBox.right = srcBox.left + m_size.w;
+    srcBox.bottom = srcBox.top + m_size.h;
+    srcBox.front = 0;
+    srcBox.back = 1;
+    m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0, src.Get(), 0, &srcBox);
+    m_duplication->ReleaseFrame();
+
+    const uint64_t fv = ++m_fenceValue;
+    bool d3d11FenceSignalled = false;
+    if (m_fence11) {
+      ComPtr<ID3D11DeviceContext4> ctx4;
+      if (SUCCEEDED(m_ctx.As(&ctx4)) &&
+          SUCCEEDED(ctx4->Signal(m_fence11.Get(), fv))) {
+        d3d11FenceSignalled = true;
+      }
+    }
+    if (!d3d11FenceSignalled) {
+      if (!m_copyCompleteQuery) {
+        m_error = L"Shared fence signal failed and no event-query fallback exists";
+        return false;
+      }
+      m_ctx->End(m_copyCompleteQuery.Get());
+      m_ctx->Flush();
+      HRESULT queryResult = S_FALSE;
+      while (queryResult == S_FALSE) {
+        queryResult = m_ctx->GetData(m_copyCompleteQuery.Get(), nullptr, 0, 0);
+        if (queryResult == S_FALSE) SwitchToThread();
+      }
+      if (FAILED(queryResult)) {
+        m_error = L"D3D11 event-query synchronization failed";
+        return false;
+      }
+      m_q->Signal(m_fence.Get(), fv);
+    }
+
+    out = m_outD12;
+    size = m_size;
+    fenceValue = fv;
+    m_frameCount.fetch_add(1);
+    return true;
+  }
+
+  if (!m_pool) return false;
 
   // Magpie _Update(): poll + drain to the newest frame
   Direct3D11CaptureFrame frame{ nullptr };
@@ -309,8 +527,7 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
   // (including title bar / borders).  We track that separately as
   // m_windowSize so we can detect when the window was resized.
   if (td.Width != m_windowSize.w || td.Height != m_windowSize.h) {
-    // Window was resized — recompute the client-area crop and rebuild the
-    // output texture + frame pool.
+    // The captured window changed size; recalculate the client-area crop.
     m_windowSize = { (uint32_t)std::max(1u, td.Width), (uint32_t)std::max(1u, td.Height) };
     recomputeClientArea(m_hwnd);
     if (m_size.w == 0 || m_size.h == 0) return false;
@@ -338,8 +555,15 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
   // NULL src box == full resource.  When the client area covers the entire
   // captured frame (fullscreen), CopySubresourceRegion with an explicit box
   // that covers everything is equivalent to CopyResource — no perf penalty.
-  m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0,
-                               src.Get(), 0, &srcBox);
+  if (m_clientOffsetX == 0 && m_clientOffsetY == 0 &&
+      m_size.w == td.Width && m_size.h == td.Height) {
+    // Preserve the fast full-resource copy path for borderless/full-frame
+    // capture; only use a boxed copy when a real crop is needed.
+    m_ctx->CopyResource(m_outD11.Get(), src.Get());
+  } else {
+    m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0,
+                                 src.Get(), 0, &srcBox);
+  }
 
   // Publish the copy to D3D12. A shared D3D11 fence is the fast path.
   // The old fallback only called Flush() and then signalled the fence from
@@ -387,6 +611,8 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
 void Capture::stop()
 {
   m_started = false;
+  m_dxgiMode = false;
+  m_duplication.Reset();
   m_arrived.revoke();
   try { if (m_session) m_session.Close(); } catch (...) {}
   m_session = nullptr;
