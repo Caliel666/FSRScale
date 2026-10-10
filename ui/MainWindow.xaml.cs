@@ -145,8 +145,6 @@ public partial class MainWindow : Window
         motion = MotionBox.SelectedIndex == 1 ? "amdof" : "fast",
         capture_mode = CaptureModeBox.SelectedIndex switch { 1 => "wgc", 2 => "display", _ => "dxgi" },
         run_as_admin = RunAsAdminCheckBox.IsChecked == true,
-        capture_mode = CaptureModeBox.SelectedIndex switch { 1 => "wgc", 2 => "display", _ => "dxgi" },
-        run_as_admin = RunAsAdminCheckBox.IsChecked == true,
         scale_hotkey = ScaleHotkeyBox.Text.Trim(),
         stop_key = StopHotkeyBox.Text.Trim(),
         overlay_key = OverlayHotkeyBox.Text.Trim(),
