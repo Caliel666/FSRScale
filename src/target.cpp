@@ -182,7 +182,7 @@ bool parseHotkey(const std::wstring& text, UINT& modifiers, UINT& vk)
 
     static const std::pair<const wchar_t*, UINT> named[] = {
         {L"esc", VK_ESCAPE}, {L"escape", VK_ESCAPE}, {L"enter", VK_RETURN},
-        {L"return", VK_RETURN}, {L"space", VK_SPACE}, {L"tab", VK_TAB}, {L"tab", VK_TAB},
+        {L"return", VK_RETURN}, {L"space", VK_SPACE}, {L"tab", VK_TAB},
         {L"backspace", VK_BACK}, {L"delete", VK_DELETE}, {L"del", VK_DELETE},
         {L"insert", VK_INSERT}, {L"home", VK_HOME}, {L"end", VK_END},
         {L"pageup", VK_PRIOR}, {L"pagedown", VK_NEXT}, {L"up", VK_UP},
