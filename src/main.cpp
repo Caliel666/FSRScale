@@ -420,7 +420,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       // is active. Calling drawCursor before focus-state handling re-applied
       // ClipCursor and hid the real cursor on every soft-unscale polling loop,
       // immediately undoing releaseCursorClip() and trapping the user in NRLive.
-      drawCursor();
+      drawCursor(captureMode == CaptureMode::DxgiWindow);
 
       if (frameLimiter.enabled() && frameLimiter.method() == 0)
         frameLimiter.wait(); // early mode: pace before capture/CPU preparation
