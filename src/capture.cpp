@@ -412,11 +412,11 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
       return false;
     }
 
-    // Desktop Duplication may bake a software cursor directly into the desktop
-    // texture (PointerPosition.Visible == false). Unlike WGC, DXGI has no
-    // cursor-capture toggle, so don't feed those cursor pixels to the scaler:
-    // release the desktop frame and switch to WGC's cursor-free capture path.
-    if (!frameInfo.PointerPosition.Visible && !m_dxgiCursorFallbackTried) {
+    // DXGI Desktop Duplication has no cursor-capture toggle: depending on the
+    // driver, the pointer may be baked into the desktop texture or overlaid
+    // separately. If the visible system cursor overlaps the target region,
+    // switch to WGC, which can explicitly exclude cursor pixels from capture.
+    if (!m_dxgiCursorFallbackTried) {
       CURSORINFO cursorInfo{ sizeof(cursorInfo) };
       POINT physicalCursor{};
       const bool cursorInCapturedRegion =
