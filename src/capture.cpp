@@ -6,6 +6,7 @@
 #include <DispatcherQueue.h>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 using namespace winrt;
 using namespace winrt::Windows::Graphics::Capture;
@@ -322,17 +323,20 @@ void Capture::recomputeClientArea(HWND hwnd)
   const int ch = std::max(1L, clientRect.bottom - clientRect.top);
   const double frameAspect = double(m_windowSize.w) / double(m_windowSize.h);
   const double clientAspect = double(cw) / double(ch);
+  const int ww = std::max(1L, windowRect.right - windowRect.left);
+  const int wh = std::max(1L, windowRect.bottom - windowRect.top);
+  const double windowAspect = double(ww) / double(wh);
+  const bool matchesClient = std::abs(frameAspect / clientAspect - 1.0) < 0.02;
+  const bool matchesWindow = std::abs(frameAspect / windowAspect - 1.0) < 0.02;
 
-  // GraphicsCaptureItem for a window can already expose only its client-sized
-  // surface. Cropping that surface a second time clips the right/bottom edges.
-  // If its aspect ratio matches the client area, preserve the entire frame.
-  if (std::abs(frameAspect / clientAspect - 1.0) < 0.035)
+  // A WGC frame can already be client-sized. Preserve that whole frame rather
+  // than cropping it a second time; also preserve true borderless fullscreen,
+  // where client and outer-window geometry are effectively identical.
+  if (matchesClient && (!matchesWindow || std::abs(clientAspect / windowAspect - 1.0) < 0.02))
     return;
 
   POINT pt{0, 0};
   ClientToScreen(hwnd, &pt);
-  const int ww = std::max(1L, windowRect.right - windowRect.left);
-  const int wh = std::max(1L, windowRect.bottom - windowRect.top);
   const double sx = double(m_windowSize.w) / double(ww);
   const double sy = double(m_windowSize.h) / double(wh);
   const int ox = pt.x - windowRect.left;
