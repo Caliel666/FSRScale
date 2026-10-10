@@ -225,48 +225,43 @@ bool Capture::start(HWND hwnd)
 // degrades to a full-frame CopySubresourceRegion (same as before).
 void Capture::recomputeClientArea(HWND hwnd)
 {
-  if (!hwnd || !IsWindow(hwnd)) {
-    m_clientOffsetX = 0;
-    m_clientOffsetY = 0;
-    m_size = m_windowSize;
+  m_clientOffsetX = 0;
+  m_clientOffsetY = 0;
+  m_size = m_windowSize;
+  if (!hwnd || !IsWindow(hwnd) || m_windowSize.w == 0 || m_windowSize.h == 0)
     return;
-  }
 
-  RECT clientRect{};
-  RECT windowRect{};
-  if (!GetClientRect(hwnd, &clientRect) || !GetWindowRect(hwnd, &windowRect)) {
-    m_clientOffsetX = 0;
-    m_clientOffsetY = 0;
-    m_size = m_windowSize;
+  RECT clientRect{}, windowRect{};
+  if (!GetClientRect(hwnd, &clientRect) || !GetWindowRect(hwnd, &windowRect))
     return;
-  }
 
-  POINT pt{ 0, 0 };
-  ClientToScreen(hwnd, &pt);
-
-  const int ww = std::max(1L, windowRect.right - windowRect.left);
-  const int wh = std::max(1L, windowRect.bottom - windowRect.top);
   const int cw = std::max(1L, clientRect.right - clientRect.left);
   const int ch = std::max(1L, clientRect.bottom - clientRect.top);
+  const double frameAspect = double(m_windowSize.w) / double(m_windowSize.h);
+  const double clientAspect = double(cw) / double(ch);
 
-  // WGC's GraphicsCaptureItem.Size is in the captured frame's physical pixels,
-  // while GetWindowRect/GetClientRect can be DPI-virtualized. Scale the HWND
-  // geometry into the actual WGC texture instead of assuming a 1:1 mapping.
+  // GraphicsCaptureItem for a window can already expose only its client-sized
+  // surface. Cropping that surface a second time clips the right/bottom edges.
+  // If its aspect ratio matches the client area, preserve the entire frame.
+  if (std::abs(frameAspect / clientAspect - 1.0) < 0.035)
+    return;
+
+  POINT pt{0, 0};
+  ClientToScreen(hwnd, &pt);
+  const int ww = std::max(1L, windowRect.right - windowRect.left);
+  const int wh = std::max(1L, windowRect.bottom - windowRect.top);
   const double sx = double(m_windowSize.w) / double(ww);
   const double sy = double(m_windowSize.h) / double(wh);
   const int ox = pt.x - windowRect.left;
   const int oy = pt.y - windowRect.top;
-
   m_clientOffsetX = (UINT)std::clamp((int)std::lround(ox * sx), 0, (int)m_windowSize.w - 1);
   m_clientOffsetY = (UINT)std::clamp((int)std::lround(oy * sy), 0, (int)m_windowSize.h - 1);
-
   const UINT maxW = m_windowSize.w - m_clientOffsetX;
   const UINT maxH = m_windowSize.h - m_clientOffsetY;
   const UINT clientW = (UINT)std::clamp((int)std::lround(cw * sx), 1, (int)maxW);
   const UINT clientH = (UINT)std::clamp((int)std::lround(ch * sy), 1, (int)maxH);
-  m_size = { clientW, clientH };
+  m_size = {clientW, clientH};
 }
-
 void Capture::waitForFrame(DWORD timeoutMs) const
 {
   if (m_frameArrivedEvent)
