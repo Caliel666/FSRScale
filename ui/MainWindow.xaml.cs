@@ -36,7 +36,6 @@ public partial class MainWindow : Window
         public int delay { get; set; } = 5;
         public bool no_overlay { get; set; }
         public string motion { get; set; } = "fast";
-        public string capture_mode { get; set; } = "wgc";
         public bool run_as_admin { get; set; } = true;
         public string scale_hotkey { get; set; } = "ctrl+alt+s";
         public string stop_key { get; set; } = "ctrl+shift+a";
@@ -51,7 +50,6 @@ public partial class MainWindow : Window
         _timer.Tick += Timer_Tick;
         TargetModeBox.SelectionChanged += (_, _) => UpdatePreview();
         MotionBox.SelectionChanged += (_, _) => UpdatePreview();
-        CaptureModeBox.SelectionChanged += (_, _) => UpdatePreview();
         DelayBox.TextChanged += (_, _) => UpdatePreview();
         TargetTextBox.TextChanged += (_, _) => UpdatePreview();
         StopHotkeyBox.TextChanged += (_, _) => UpdatePreview();
@@ -121,7 +119,6 @@ public partial class MainWindow : Window
             DelayBox.Text = Math.Clamp(p.delay, 1, 30).ToString();
             HudCheckBox.IsChecked = !p.no_overlay;
             MotionBox.SelectedIndex = p.motion == "amdof" ? 1 : 0;
-            CaptureModeBox.SelectedIndex = p.capture_mode == "dxgi" ? 0 : 1;
             RunAsAdminCheckBox.IsChecked = p.run_as_admin;
             ScaleHotkeyBox.Text = p.scale_hotkey;
             StopHotkeyBox.Text = p.stop_key;
@@ -143,7 +140,6 @@ public partial class MainWindow : Window
         delay = int.TryParse(DelayBox.Text, out int delay) ? Math.Clamp(delay, 1, 30) : 5,
         no_overlay = HudCheckBox.IsChecked != true,
         motion = MotionBox.SelectedIndex == 1 ? "amdof" : "fast",
-        capture_mode = CaptureModeBox.SelectedIndex == 1 ? "wgc" : "dxgi",
         run_as_admin = RunAsAdminCheckBox.IsChecked == true,
         scale_hotkey = ScaleHotkeyBox.Text.Trim(),
         stop_key = StopHotkeyBox.Text.Trim(),
@@ -341,7 +337,6 @@ public partial class MainWindow : Window
         else if (p.target_mode == "window") { start.ArgumentList.Add("-window"); start.ArgumentList.Add(p.target_text); start.ArgumentList.Add("-delay"); start.ArgumentList.Add(p.delay.ToString()); }
         if (p.no_overlay) start.ArgumentList.Add("-nooverlay");
         start.ArgumentList.Add("--mv"); start.ArgumentList.Add(p.motion);
-        start.ArgumentList.Add("--capture"); start.ArgumentList.Add(p.capture_mode);
         start.ArgumentList.Add("--key"); start.ArgumentList.Add(p.stop_key);
         start.ArgumentList.Add("--overlaykey"); start.ArgumentList.Add(p.overlay_key);
         start.ArgumentList.Add("--bindbypass"); start.ArgumentList.Add(p.bind_bypass);
@@ -401,7 +396,7 @@ public partial class MainWindow : Window
         if (CommandPreview == null || _loadingProfile) return;
         var p = ReadProfile();
         string target = p.target_mode switch { "front" => "-front", "pid" => $"-pid {p.target_text}", "pname" => $"-pname \"{p.target_text}\"", "window" => $"-window \"{p.target_text}\"", _ => $"-picker {p.delay}" };
-        CommandPreview.Text = $"{p.exe_path} {target} --capture {p.capture_mode} --mv {p.motion} --key {p.stop_key} --overlaykey {p.overlay_key} --bindbypass {p.bind_bypass}" + (p.run_as_admin ? " [run as admin]" : "");
+        CommandPreview.Text = $"{p.exe_path} {target} --mv {p.motion} --key {p.stop_key} --overlaykey {p.overlay_key} --bindbypass {p.bind_bypass}" + (p.run_as_admin ? " [run as admin]" : "");
     }
 
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
