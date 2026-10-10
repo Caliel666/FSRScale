@@ -36,7 +36,7 @@ public partial class MainWindow : Window
         public int delay { get; set; } = 5;
         public bool no_overlay { get; set; }
         public string motion { get; set; } = "fast";
-        public string capture_mode { get; set; } = "dxgi";
+        public string capture_mode { get; set; } = "wgc";
         public bool run_as_admin { get; set; } = true;
         public string scale_hotkey { get; set; } = "ctrl+alt+s";
         public string stop_key { get; set; } = "ctrl+shift+a";
