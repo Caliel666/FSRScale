@@ -392,7 +392,7 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
     if (!m_duplication) return false;
     DXGI_OUTDUPL_FRAME_INFO frameInfo{};
     ComPtr<IDXGIResource> desktopResource;
-    HRESULT acquired = m_duplication->AcquireNextFrame(2, &frameInfo, &desktopResource);
+    HRESULT acquired = m_duplication->AcquireNextFrame(16, &frameInfo, &desktopResource);
     if (acquired == DXGI_ERROR_WAIT_TIMEOUT) return false;
     if (FAILED(acquired)) {
       m_error = L"DXGI AcquireNextFrame 0x" + hex(acquired);
