@@ -149,7 +149,90 @@ bool Capture::createOutputTexture(Size size)
   return true;
 }
 
-bool Capture::start(HWND hwnd)
+bool Capture::start(HWND hwnd, CaptureMode mode)
+{
+  if (mode == CaptureMode::WgcWindow)
+    return startWgc(hwnd);
+  return startDxgi(hwnd, mode == CaptureMode::DxgiDisplay);
+}
+
+bool Capture::startDxgi(HWND hwnd, bool displayCapture)
+{
+  stop();
+  m_hwnd = hwnd;
+  m_dxgiMode = true;
+  m_displayCapture = displayCapture;
+  m_monitorRect = {};
+  m_captureRect = {};
+  if (!hwnd || !IsWindow(hwnd)) { m_error = L"Invalid target window"; return false; }
+
+  HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi{ sizeof(mi) };
+  if (!monitor || !GetMonitorInfoW(monitor, &mi)) {
+    m_error = L"Could not query target monitor";
+    return false;
+  }
+  m_monitorRect = mi.rcMonitor;
+
+  if (displayCapture) {
+    m_captureRect = m_monitorRect;
+  } else {
+    RECT client{};
+    POINT origin{0, 0};
+    if (!GetClientRect(hwnd, &client) || !ClientToScreen(hwnd, &origin)) {
+      m_error = L"Could not query target client area";
+      return false;
+    }
+    m_captureRect = {
+      origin.x, origin.y,
+      origin.x + (client.right - client.left),
+      origin.y + (client.bottom - client.top)
+    };
+    RECT clipped{};
+    if (!IntersectRect(&clipped, &m_captureRect, &m_monitorRect)) {
+      m_error = L"Target client area is outside the selected monitor";
+      return false;
+    }
+    m_captureRect = clipped;
+  }
+
+  const LONG width = m_captureRect.right - m_captureRect.left;
+  const LONG height = m_captureRect.bottom - m_captureRect.top;
+  if (width <= 0 || height <= 0) { m_error = L"Capture region has zero size"; return false; }
+  m_size = { (uint32_t)width, (uint32_t)height };
+  m_windowSize = m_size;
+
+  ComPtr<IDXGIDevice> dxgiDevice;
+  HRESULT h = m_d11.As(&dxgiDevice);
+  if (FAILED(h)) { m_error = L"Query IDXGIDevice 0x" + hex(h); return false; }
+  ComPtr<IDXGIAdapter> adapter;
+  h = dxgiDevice->GetAdapter(&adapter);
+  if (FAILED(h)) { m_error = L"IDXGIDevice::GetAdapter 0x" + hex(h); return false; }
+
+  bool foundOutput = false;
+  for (UINT i = 0; ; ++i) {
+    ComPtr<IDXGIOutput> output;
+    h = adapter->EnumOutputs(i, &output);
+    if (h == DXGI_ERROR_NOT_FOUND) break;
+    if (FAILED(h)) { m_error = L"IDXGIAdapter::EnumOutputs 0x" + hex(h); return false; }
+    DXGI_OUTPUT_DESC desc{};
+    if (FAILED(output->GetDesc(&desc))) continue;
+    if (desc.Monitor != monitor) continue;
+    ComPtr<IDXGIOutput1> output1;
+    h = output.As(&output1);
+    if (FAILED(h)) { m_error = L"Query IDXGIOutput1 0x" + hex(h); return false; }
+    h = output1->DuplicateOutput(m_d11.Get(), &m_duplication);
+    if (FAILED(h)) { m_error = L"DXGI DuplicateOutput 0x" + hex(h); return false; }
+    foundOutput = true;
+    break;
+  }
+  if (!foundOutput) { m_error = L"No DXGI output matches the target monitor"; return false; }
+  if (!createOutputTexture(m_size)) return false;
+  m_started = true;
+  return true;
+}
+
+bool Capture::startWgc(HWND hwnd)
 {
   if (m_frameArrivedEvent) { CloseHandle(m_frameArrivedEvent); m_frameArrivedEvent = nullptr; }
   m_frameArrivedEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -264,13 +347,83 @@ void Capture::recomputeClientArea(HWND hwnd)
 }
 void Capture::waitForFrame(DWORD timeoutMs) const
 {
+  if (m_dxgiMode) {
+    Sleep(timeoutMs);
+    return;
+  }
   if (m_frameArrivedEvent)
     WaitForSingleObject(m_frameArrivedEvent, timeoutMs);
 }
 
 bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceValue)
 {
-  if (!m_started || !m_pool) return false;
+  if (!m_started) return false;
+
+  if (m_dxgiMode) {
+    if (!m_duplication) return false;
+    DXGI_OUTDUPL_FRAME_INFO frameInfo{};
+    ComPtr<IDXGIResource> desktopResource;
+    HRESULT acquired = m_duplication->AcquireNextFrame(0, &frameInfo, &desktopResource);
+    if (acquired == DXGI_ERROR_WAIT_TIMEOUT) return false;
+    if (FAILED(acquired)) {
+      m_error = L"DXGI AcquireNextFrame 0x" + hex(acquired);
+      return false;
+    }
+
+    ComPtr<ID3D11Texture2D> src;
+    HRESULT query = desktopResource.As(&src);
+    if (FAILED(query)) {
+      m_duplication->ReleaseFrame();
+      m_error = L"DXGI desktop texture query 0x" + hex(query);
+      return false;
+    }
+
+    D3D11_BOX srcBox{};
+    srcBox.left = (UINT)(m_captureRect.left - m_monitorRect.left);
+    srcBox.top = (UINT)(m_captureRect.top - m_monitorRect.top);
+    srcBox.right = srcBox.left + m_size.w;
+    srcBox.bottom = srcBox.top + m_size.h;
+    srcBox.front = 0;
+    srcBox.back = 1;
+    m_ctx->CopySubresourceRegion(m_outD11.Get(), 0, 0, 0, 0, src.Get(), 0, &srcBox);
+    m_duplication->ReleaseFrame();
+
+    const uint64_t fv = ++m_fenceValue;
+    bool d3d11FenceSignalled = false;
+    if (m_fence11) {
+      ComPtr<ID3D11DeviceContext4> ctx4;
+      if (SUCCEEDED(m_ctx.As(&ctx4)) &&
+          SUCCEEDED(ctx4->Signal(m_fence11.Get(), fv))) {
+        d3d11FenceSignalled = true;
+      }
+    }
+    if (!d3d11FenceSignalled) {
+      if (!m_copyCompleteQuery) {
+        m_error = L"Shared fence signal failed and no event-query fallback exists";
+        return false;
+      }
+      m_ctx->End(m_copyCompleteQuery.Get());
+      m_ctx->Flush();
+      HRESULT queryResult = S_FALSE;
+      while (queryResult == S_FALSE) {
+        queryResult = m_ctx->GetData(m_copyCompleteQuery.Get(), nullptr, 0, 0);
+        if (queryResult == S_FALSE) SwitchToThread();
+      }
+      if (FAILED(queryResult)) {
+        m_error = L"D3D11 event-query synchronization failed";
+        return false;
+      }
+      m_q->Signal(m_fence.Get(), fv);
+    }
+
+    out = m_outD12;
+    size = m_size;
+    fenceValue = fv;
+    m_frameCount.fetch_add(1);
+    return true;
+  }
+
+  if (!m_pool) return false;
 
   // Magpie _Update(): poll + drain to the newest frame
   Direct3D11CaptureFrame frame{ nullptr };
@@ -382,6 +535,9 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
 void Capture::stop()
 {
   m_started = false;
+  m_dxgiMode = false;
+  m_displayCapture = false;
+  m_duplication.Reset();
   m_arrived.revoke();
   try { if (m_session) m_session.Close(); } catch (...) {}
   m_session = nullptr;
