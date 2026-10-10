@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Threading;
 
 namespace NRLiveUI;
@@ -35,6 +36,8 @@ public partial class MainWindow : Window
         public int delay { get; set; } = 5;
         public bool no_overlay { get; set; }
         public string motion { get; set; } = "fast";
+        public string capture_mode { get; set; } = "dxgi";
+        public bool run_as_admin { get; set; } = true;
         public string scale_hotkey { get; set; } = "ctrl+alt+s";
         public string stop_key { get; set; } = "ctrl+shift+a";
         public string overlay_key { get; set; } = "ctrl+home";
@@ -48,6 +51,7 @@ public partial class MainWindow : Window
         _timer.Tick += Timer_Tick;
         TargetModeBox.SelectionChanged += (_, _) => UpdatePreview();
         MotionBox.SelectionChanged += (_, _) => UpdatePreview();
+        CaptureModeBox.SelectionChanged += (_, _) => UpdatePreview();
         DelayBox.TextChanged += (_, _) => UpdatePreview();
         TargetTextBox.TextChanged += (_, _) => UpdatePreview();
         StopHotkeyBox.TextChanged += (_, _) => UpdatePreview();
@@ -57,6 +61,8 @@ public partial class MainWindow : Window
         ExePathBox.TextChanged += (_, _) => UpdatePreview();
         HudCheckBox.Checked += (_, _) => UpdatePreview();
         HudCheckBox.Unchecked += (_, _) => UpdatePreview();
+        RunAsAdminCheckBox.Checked += (_, _) => UpdatePreview();
+        RunAsAdminCheckBox.Unchecked += (_, _) => UpdatePreview();
     }
 
     private static string SafeName(string name)
@@ -115,6 +121,8 @@ public partial class MainWindow : Window
             DelayBox.Text = Math.Clamp(p.delay, 1, 30).ToString();
             HudCheckBox.IsChecked = !p.no_overlay;
             MotionBox.SelectedIndex = p.motion == "amdof" ? 1 : 0;
+            CaptureModeBox.SelectedIndex = p.capture_mode switch { "wgc" => 1, "display" => 2, _ => 0 };
+            RunAsAdminCheckBox.IsChecked = p.run_as_admin;
             ScaleHotkeyBox.Text = p.scale_hotkey;
             StopHotkeyBox.Text = p.stop_key;
             OverlayHotkeyBox.Text = p.overlay_key;
@@ -135,6 +143,10 @@ public partial class MainWindow : Window
         delay = int.TryParse(DelayBox.Text, out int delay) ? Math.Clamp(delay, 1, 30) : 5,
         no_overlay = HudCheckBox.IsChecked != true,
         motion = MotionBox.SelectedIndex == 1 ? "amdof" : "fast",
+        capture_mode = CaptureModeBox.SelectedIndex switch { 1 => "wgc", 2 => "display", _ => "dxgi" },
+        run_as_admin = RunAsAdminCheckBox.IsChecked == true,
+        capture_mode = CaptureModeBox.SelectedIndex switch { 1 => "wgc", 2 => "display", _ => "dxgi" },
+        run_as_admin = RunAsAdminCheckBox.IsChecked == true,
         scale_hotkey = ScaleHotkeyBox.Text.Trim(),
         stop_key = StopHotkeyBox.Text.Trim(),
         overlay_key = OverlayHotkeyBox.Text.Trim(),
@@ -162,9 +174,47 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) ExePathBox.Text = dialog.FileName;
     }
 
-    private void ScaleHotkeyBox_LostFocus(object sender, RoutedEventArgs e)
+    private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        e.Handled = true;
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or
+            Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin or Key.Clear or Key.DeadCharProcessed)
+            return;
+
+        var parts = new List<string>();
+        ModifierKeys mods = Keyboard.Modifiers;
+        if ((mods & ModifierKeys.Control) != 0) parts.Add("ctrl");
+        if ((mods & ModifierKeys.Alt) != 0) parts.Add("alt");
+        if ((mods & ModifierKeys.Shift) != 0) parts.Add("shift");
+        if ((mods & ModifierKeys.Windows) != 0) parts.Add("win");
+        string keyName = key switch
+        {
+            >= Key.A and <= Key.Z => key.ToString().ToLowerInvariant(),
+            >= Key.D0 and <= Key.D9 => ((int)key - (int)Key.D0).ToString(),
+            >= Key.NumPad0 and <= Key.NumPad9 => ((int)key - (int)Key.NumPad0).ToString(),
+            _ => key switch
+            {
+                Key.Space => "space", Key.Return => "enter", Key.Escape => "esc",
+                Key.PageUp => "pageup", Key.PageDown => "pagedown",
+                Key.Back => "backspace", Key.Delete => "delete",
+                Key.OemTilde => "", Key.OemPlus => "", Key.OemMinus => "",
+                _ => key.ToString().ToLowerInvariant()
+            }
+        };
+        if (string.IsNullOrEmpty(keyName) || keyName is "leftctrl" or "rightctrl" or "leftalt" or "rightalt" or "leftshift" or "rightshift")
+        {
+            FooterStatus.Text = "Choose a letter, number, function key, or named key with optional modifiers.";
+            return;
+        }
+        parts.Add(keyName);
+        string combo = string.Join("+", parts);
+        if (sender == ScaleHotkeyBox) ScaleHotkeyBox.Text = combo;
+        else if (sender == StopHotkeyBox) StopHotkeyBox.Text = combo;
+        else if (sender == OverlayHotkeyBox) OverlayHotkeyBox.Text = combo;
+        SidebarHotkey.Text = ScaleHotkeyBox.Text.Replace("+", " + ").ToUpperInvariant();
         RegisterToggleHotkey();
+        UpdatePreview();
     }
 
     private void RegisterToggleHotkey()
@@ -283,7 +333,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        var start = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe) ?? Root, UseShellExecute = false };
+        var start = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe) ?? Root, UseShellExecute = p.run_as_admin };
+        if (p.run_as_admin) start.Verb = "runas";
         if (p.target_mode == "picker") { start.ArgumentList.Add("-picker"); start.ArgumentList.Add(p.delay.ToString()); }
         else if (p.target_mode == "front") { start.ArgumentList.Add("-front"); start.ArgumentList.Add("-delay"); start.ArgumentList.Add(p.delay.ToString()); }
         else if (p.target_mode == "pid") { start.ArgumentList.Add("-pid"); start.ArgumentList.Add(p.target_text); start.ArgumentList.Add("-delay"); start.ArgumentList.Add(p.delay.ToString()); }
@@ -291,6 +342,7 @@ public partial class MainWindow : Window
         else if (p.target_mode == "window") { start.ArgumentList.Add("-window"); start.ArgumentList.Add(p.target_text); start.ArgumentList.Add("-delay"); start.ArgumentList.Add(p.delay.ToString()); }
         if (p.no_overlay) start.ArgumentList.Add("-nooverlay");
         start.ArgumentList.Add("--mv"); start.ArgumentList.Add(p.motion);
+        start.ArgumentList.Add("--capture"); start.ArgumentList.Add(p.capture_mode);
         start.ArgumentList.Add("--key"); start.ArgumentList.Add(p.stop_key);
         start.ArgumentList.Add("--overlaykey"); start.ArgumentList.Add(p.overlay_key);
         start.ArgumentList.Add("--bindbypass"); start.ArgumentList.Add(p.bind_bypass);
@@ -350,7 +402,7 @@ public partial class MainWindow : Window
         if (CommandPreview == null || _loadingProfile) return;
         var p = ReadProfile();
         string target = p.target_mode switch { "front" => "-front", "pid" => $"-pid {p.target_text}", "pname" => $"-pname \"{p.target_text}\"", "window" => $"-window \"{p.target_text}\"", _ => $"-picker {p.delay}" };
-        CommandPreview.Text = $"{p.exe_path} {target} --mv {p.motion} --key {p.stop_key} --overlaykey {p.overlay_key} --bindbypass {p.bind_bypass}";
+        CommandPreview.Text = $"{p.exe_path} {target} --capture {p.capture_mode} --mv {p.motion} --key {p.stop_key} --overlaykey {p.overlay_key} --bindbypass {p.bind_bypass}" + (p.run_as_admin ? " [run as admin]" : "");
     }
 
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
