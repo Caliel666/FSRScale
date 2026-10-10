@@ -37,6 +37,7 @@ public partial class MainWindow : Window
         public bool no_overlay { get; set; }
         public string motion { get; set; } = "fast";
         public string capture_mode { get; set; } = "wgc";
+        public int? schema_version { get; set; }
         public bool run_as_admin { get; set; } = true;
         public string scale_hotkey { get; set; } = "ctrl+alt+s";
         public string stop_key { get; set; } = "ctrl+shift+a";
@@ -116,6 +117,14 @@ public partial class MainWindow : Window
             _currentProfile = name;
             var p = new Profile();
             try { if (File.Exists(ProfilePath(name))) p = JsonSerializer.Deserialize<Profile>(File.ReadAllText(ProfilePath(name))) ?? p; } catch { }
+            // Migrate existing profiles once: WGC is the default again, but a
+            // user's explicit DXGI choice in a non-default profile is preserved.
+            if (p.schema_version == null)
+            {
+                if (name == "Default") p.capture_mode = "wgc";
+                p.schema_version = 1;
+                try { File.WriteAllText(ProfilePath(name), JsonSerializer.Serialize(p, new JsonSerializerOptions { WriteIndented = true })); } catch { }
+            }
             TargetModeBox.SelectedIndex = p.target_mode switch { "front" => 1, "pid" => 2, "pname" => 3, "window" => 4, _ => 0 };
             TargetTextBox.Text = p.target_text;
             DelayBox.Text = Math.Clamp(p.delay, 1, 30).ToString();
