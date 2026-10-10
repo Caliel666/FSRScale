@@ -188,20 +188,21 @@ public partial class MainWindow : Window
         if ((mods & ModifierKeys.Alt) != 0) parts.Add("alt");
         if ((mods & ModifierKeys.Shift) != 0) parts.Add("shift");
         if ((mods & ModifierKeys.Windows) != 0) parts.Add("win");
-        string keyName = key switch
-        {
-            >= Key.A and <= Key.Z => key.ToString().ToLowerInvariant(),
-            >= Key.D0 and <= Key.D9 => ((int)key - (int)Key.D0).ToString(),
-            >= Key.NumPad0 and <= Key.NumPad9 => ((int)key - (int)Key.NumPad0).ToString(),
-            _ => key switch
-            {
-                Key.Space => "space", Key.Return => "enter", Key.Escape => "esc",
-                Key.PageUp => "pageup", Key.PageDown => "pagedown",
-                Key.Back => "backspace", Key.Delete => "delete",
-                Key.OemTilde => "", Key.OemPlus => "", Key.OemMinus => "",
-                _ => key.ToString().ToLowerInvariant()
-            }
-        };
+        string rawKey = key.ToString();
+        string keyName = rawKey.Length == 1 && char.IsLetter(rawKey[0])
+            ? rawKey.ToLowerInvariant()
+            : rawKey.Length == 2 && rawKey[0] == 'D' && char.IsDigit(rawKey[1])
+                ? rawKey[1].ToString()
+                : rawKey.StartsWith("NumPad", StringComparison.Ordinal) && rawKey.Length == 7 && char.IsDigit(rawKey[6])
+                    ? rawKey[6].ToString()
+                    : key switch
+                    {
+                        Key.Space => "space", Key.Return => "enter", Key.Escape => "esc",
+                        Key.PageUp => "pageup", Key.PageDown => "pagedown",
+                        Key.Back => "backspace", Key.Delete => "delete",
+                        Key.OemTilde or Key.OemPlus or Key.OemMinus => "",
+                        _ => rawKey.ToLowerInvariant()
+                    };
         if (string.IsNullOrEmpty(keyName) || keyName is "leftctrl" or "rightctrl" or "leftalt" or "rightalt" or "leftshift" or "rightshift")
         {
             FooterStatus.Text = "Choose a letter, number, function key, or named key with optional modifiers.";
