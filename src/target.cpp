@@ -432,6 +432,13 @@ bool parseTargetArgs(int argc, wchar_t** argv, TargetSpec& spec, std::wstring& e
             spec.mode = TargetMode::Process;
             spec.text = value;
             explicitTarget = true;
+        } else if (opt == L"--capture" || opt == L"-capture") {
+            if (!need(value)) return false;
+            std::wstring mode = lower(value);
+            if (mode == L"dxgi" || mode == L"window") spec.captureMode = TargetSpec::CaptureMode::DxgiWindow;
+            else if (mode == L"wgc") spec.captureMode = TargetSpec::CaptureMode::WgcWindow;
+            else if (mode == L"display" || mode == L"monitor") spec.captureMode = TargetSpec::CaptureMode::DxgiDisplay;
+            else { error = L"invalid capture mode: " + value + L" (valid: dxgi, wgc, display)"; return false; }
         } else if (opt == L"--mv" || opt == L"-mv") {
             if (!need(value)) return false;
             std::wstring mv = lower(value);
