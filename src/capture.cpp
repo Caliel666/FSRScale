@@ -29,6 +29,15 @@ static GraphicsCaptureItem itemFromWindow(HWND hwnd)
   return item;
 }
 
+static GraphicsCaptureItem itemFromMonitor(HMONITOR monitor)
+{
+  auto interop = get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+  GraphicsCaptureItem item{ nullptr };
+  check_hresult(interop->CreateForMonitor(
+    monitor, guid_of<GraphicsCaptureItem>(), reinterpret_cast<void**>(put_abi(item))));
+  return item;
+}
+
 static IDirect3DDevice makeWinrtDevice(ID3D11Device* d)
 {
   ComPtr<IDXGIDevice> gd;
@@ -153,8 +162,10 @@ bool Capture::createOutputTexture(Size size)
 bool Capture::start(HWND hwnd, CaptureMode mode)
 {
   if (mode == CaptureMode::WgcWindow)
-    return startWgc(hwnd);
-  return startDxgi(hwnd, mode == CaptureMode::DxgiDisplay);
+    return startWgc(hwnd, false);
+  if (mode == CaptureMode::WgcDisplay)
+    return startWgc(hwnd, true);
+  return startDxgi(hwnd, false);
 }
 
 bool Capture::startDxgi(HWND hwnd, bool displayCapture)
@@ -233,8 +244,10 @@ bool Capture::startDxgi(HWND hwnd, bool displayCapture)
   return true;
 }
 
-bool Capture::startWgc(HWND hwnd)
+bool Capture::startWgc(HWND hwnd, bool monitorCapture)
 {
+  stop();
+  m_monitorCapture = monitorCapture;
   if (m_frameArrivedEvent) { CloseHandle(m_frameArrivedEvent); m_frameArrivedEvent = nullptr; }
   m_frameArrivedEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   if (!m_frameArrivedEvent) { m_error = L"Failed to create WGC frame event"; return false; }
@@ -244,15 +257,27 @@ bool Capture::startWgc(HWND hwnd)
   m_hwnd = hwnd;
 
   try {
-    m_item = itemFromWindow(hwnd);
+    if (monitorCapture) {
+      HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+      if (!monitor) { m_error = L"Could not locate target monitor"; return false; }
+      m_item = itemFromMonitor(monitor);
+    } else {
+      m_item = itemFromWindow(hwnd);
+    }
     auto itemSize = m_item.Size();
     if (itemSize.Width <= 0 || itemSize.Height <= 0) {
-      m_error = L"Window reports zero size"; return false;
+      m_error = monitorCapture ? L"Monitor reports zero size" : L"Window reports zero size";
+      return false;
     }
     m_windowSize = { (uint32_t)itemSize.Width, (uint32_t)itemSize.Height };
-    // Compute the client-area crop rect for this window so we can exclude
-    // the title bar / borders when scaling a windowed-mode target.
-    recomputeClientArea(hwnd);
+    if (monitorCapture) {
+      m_size = m_windowSize;
+      m_clientOffsetX = m_clientOffsetY = 0;
+    } else {
+      // Compute the client-area crop rect for this window so we can exclude
+      // the title bar / borders when scaling a windowed-mode target.
+      recomputeClientArea(hwnd);
+    }
     if (m_size.w == 0 || m_size.h == 0) {
       m_error = L"Client area is zero"; return false;
     }
@@ -367,7 +392,7 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
     if (!m_duplication) return false;
     DXGI_OUTDUPL_FRAME_INFO frameInfo{};
     ComPtr<IDXGIResource> desktopResource;
-    HRESULT acquired = m_duplication->AcquireNextFrame(0, &frameInfo, &desktopResource);
+    HRESULT acquired = m_duplication->AcquireNextFrame(2, &frameInfo, &desktopResource);
     if (acquired == DXGI_ERROR_WAIT_TIMEOUT) return false;
     if (FAILED(acquired)) {
       m_error = L"DXGI AcquireNextFrame 0x" + hex(acquired);
@@ -461,10 +486,15 @@ bool Capture::acquire(ComPtr<ID3D12Resource>& out, Size& size, uint64_t& fenceVa
   // (including title bar / borders).  We track that separately as
   // m_windowSize so we can detect when the window was resized.
   if (td.Width != m_windowSize.w || td.Height != m_windowSize.h) {
-    // Window was resized — recompute the client-area crop and rebuild the
-    // output texture + frame pool.
+    // The captured window/monitor changed size. Monitor capture is already
+    // the full display surface and must never apply a window client-area crop.
     m_windowSize = { (uint32_t)std::max(1u, td.Width), (uint32_t)std::max(1u, td.Height) };
-    recomputeClientArea(m_hwnd);
+    if (m_monitorCapture) {
+      m_size = m_windowSize;
+      m_clientOffsetX = m_clientOffsetY = 0;
+    } else {
+      recomputeClientArea(m_hwnd);
+    }
     if (m_size.w == 0 || m_size.h == 0) return false;
     if (!createOutputTexture(m_size)) return false;
     try {
@@ -541,6 +571,7 @@ void Capture::stop()
   m_started = false;
   m_dxgiMode = false;
   m_displayCapture = false;
+  m_monitorCapture = false;
   m_duplication.Reset();
   m_arrived.revoke();
   try { if (m_session) m_session.Close(); } catch (...) {}
