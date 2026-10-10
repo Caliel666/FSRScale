@@ -15,7 +15,7 @@ struct TargetSpec {
   bool noOverlay = false;
   bool front = false;
   enum class MotionMode { AmdOf, Fast };
-  enum class CaptureMode { DxgiWindow, WgcWindow, WgcDisplay };
+  enum class CaptureMode { DxgiWindow, WgcWindow };
   CaptureMode captureMode = CaptureMode::DxgiWindow;
   MotionMode motionMode = MotionMode::Fast;
   std::wstring motionModeText = L"fast";
