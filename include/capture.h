@@ -39,6 +39,7 @@ public:
   void release(uint64_t) {} // no-op; Magpie does not need this
   bool saveScreenshot(const std::wstring& folder, uint64_t frameIndex);
   void stop();
+  bool usingDxgi() const { return m_dxgiMode; }
   const std::wstring& lastError() const { return m_error; }
   uint64_t totalFrames() const { return m_frameCount.load(); }
 
