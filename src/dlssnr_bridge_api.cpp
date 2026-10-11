@@ -35,6 +35,8 @@ nr::Controls makeControls(const NRLiveDlssNrSettings& s) {
     c.apply_model = true;
     c.style = std::clamp(s.style, 0, 2);
     c.intensity = std::clamp(s.intensity, 0.0f, 2.0f);
+    c.local_tone = std::clamp(s.local_tone, 0.0f, 2.0f);
+    c.max_ratio = std::clamp(s.max_ratio, 1.0f, 8.0f);
     c.local_structure = std::clamp(s.structure, 0.0f, 2.0f);
     c.skin_structure = std::clamp(s.skin_structure, -1.0f, 2.0f);
     c.automatic_mask = s.automatic_skin_mask != 0;
