@@ -9,6 +9,7 @@ struct OverlayDlssNrConfig;
 // is a fail-open condition: the original captured frame continues through FSR unchanged.
 class DlssNrRuntime {
 public:
+  ~DlssNrRuntime() { shutdown(); }
   bool process(Graphics& graphics, ID3D12Resource* colour,
                D3D12_RESOURCE_STATES colourState, ID3D12Resource* motion,
                D3D12_RESOURCE_STATES motionState, bool reset,
