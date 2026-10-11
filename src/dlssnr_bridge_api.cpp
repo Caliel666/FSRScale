@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -20,6 +21,9 @@ struct HostSession {
     std::mutex mutex;
     float requestedScale = -1.0f;
     float activeScale = 1.0f;
+    float pendingScale = 1.0f;
+    std::chrono::steady_clock::time_point scaleChangeAt{};
+    bool scaleChangePending = false;
     bool fallbackTried = false;
 };
 
@@ -80,11 +84,28 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
     std::lock_guard lock(host->mutex);
     try {
         const float requestedScale = std::clamp(settings->model_scale, 0.25f, 1.0f);
-        if (std::abs(requestedScale - host->requestedScale) > 0.001f) {
+        const auto now = std::chrono::steady_clock::now();
+        if (host->requestedScale < 0.0f) {
+            // Apply the initial scale immediately; only interactive changes are debounced.
             host->requestedScale = requestedScale;
             host->activeScale = requestedScale;
             host->fallbackTried = false;
             host->error.clear();
+        } else if (std::abs(requestedScale - host->requestedScale) > 0.001f) {
+            host->requestedScale = requestedScale;
+            host->pendingScale = requestedScale;
+            host->scaleChangeAt = now;
+            host->scaleChangePending = true;
+            host->fallbackTried = false;
+            host->error.clear();
+        }
+        // A trackbar sends a new value for every thumb movement. Waiting until
+        // it has been stable for 500 ms prevents one Vulkan network allocation
+        // per slider tick and avoids keeping many obsolete scales resident.
+        if (host->scaleChangePending &&
+            now - host->scaleChangeAt >= std::chrono::milliseconds(500)) {
+            host->activeScale = host->pendingScale;
+            host->scaleChangePending = false;
         }
         host->session->set_model_scale(host->activeScale);
         host->session->set_history_strength(std::clamp(settings->history_strength, 0.0f, 1.0f));
