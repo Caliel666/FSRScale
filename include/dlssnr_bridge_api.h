@@ -20,6 +20,8 @@ typedef struct NRLiveDlssNrSettings {
   int style;                 // 0 Neutral, 1 Natural, 2 Cinematic
   float model_scale;         // 0.25..1.0
   float intensity;           // 0..2
+  float local_tone;           // 0..2
+  float max_ratio;            // 1..8
   float structure;           // 0..2
   float skin_structure;      // -1..2
   float history_strength;    // 0..1
