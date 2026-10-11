@@ -650,15 +650,17 @@ bool Graphics::present()
   // list, not replay the already-submitted original list.
   ID3D12CommandList* lists[] = { cmd() };
   m_queue->ExecuteCommandLists(1, lists);
-  // Sync interval 0 = no vsync wait on CPU.
-  m_swap->Present(0, 0);
 
-  // Fence the allocator slot used by this frame. The three-slot ring protects
-  // D3D12 allocator reuse while allowing two or more frames to remain queued.
-  // The swapchain's current index selects the render target, not the allocator.
+  // Fence the allocator slot BEFORE Present. FSR FG submits generation work
+  // inside Present on the same queue; that work does not use m_alloc[slot].
+  // Signaling after Present made begin() wait on FG completion and halved
+  // base-frame rate under frame generation.
   const uint64_t v = ++m_fenceValue;
   m_queue->Signal(m_fence.Get(), v);
   m_frameSlotFence[m_frameSlot] = v;
+
+  // Sync interval 0 = no vsync wait on CPU.
+  m_swap->Present(0, 0);
 
   // A screenshot is synchronized only on the frame that requested it.
   // This guarantees the PNG contains the post-FSR backbuffer while normal
