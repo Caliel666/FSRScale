@@ -34,7 +34,7 @@ struct OverlayDlssNrConfig {
   float structure = 1.0f;
   float intensity = 1.0f;
   float colorStrength = 0.0f; // source chroma at 0, NR chroma at 1
-  int passes = 1; // neural refinement passes, 1..4
+  int passes = 1; // neural refinement passes, 1..3
   float localTone = 1.0f;
   float maxRatio = 2.0f;
   float skinStructure = -1.0f;
