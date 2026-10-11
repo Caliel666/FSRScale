@@ -33,6 +33,8 @@ struct OverlayDlssNrConfig {
   int style = 0; // 0=Neutral, 1=Natural, 2=Cinematic
   float structure = 1.0f;
   float intensity = 1.0f;
+  float localTone = 1.0f;
+  float maxRatio = 2.0f;
   float skinStructure = -1.0f;
   float historyStrength = 0.8f;
   bool automaticSkinMask = true;
