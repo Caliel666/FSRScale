@@ -87,7 +87,8 @@ private:
   ComPtr<ID3D12Fence> m_fence;
   HANDLE m_fenceEvent = nullptr;
   uint64_t m_fenceValue = 0;
-  uint64_t m_frameFence[3]{};
+  uint64_t m_frameSlotFence[3]{};
+  uint32_t m_frameSlot = 0;
   ComPtr<ID3D12Resource> m_back[3];
   uint32_t m_index = 0;
   UINT m_rtvStride = 0;
