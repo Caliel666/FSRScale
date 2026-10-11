@@ -11,8 +11,9 @@ class DlssNrRuntime {
 public:
   ~DlssNrRuntime() { shutdown(); }
   bool available() { return ensureLoaded(); }
-  bool process(Graphics& graphics, ID3D12Resource* colour,
-               D3D12_RESOURCE_STATES colourState, ID3D12Resource* motion,
+  bool process(Graphics& graphics, ID3D12Resource* inputColour,
+               D3D12_RESOURCE_STATES inputColourState, ID3D12Resource* outputColour,
+               D3D12_RESOURCE_STATES outputColourState, ID3D12Resource* motion,
                D3D12_RESOURCE_STATES motionState, bool reset,
                const OverlayDlssNrConfig& settings);
   void shutdown();
@@ -22,7 +23,8 @@ private:
   using CreateFn = void* (*)(const wchar_t*);
   using DestroyFn = void (*)(void*);
   using ProcessFn = int (*)(void*, ID3D12Device*, ID3D12CommandQueue*,
-      ID3D12Resource*, uint32_t, ID3D12Resource*, uint32_t, int,
+      ID3D12Resource*, uint32_t, ID3D12Resource*, uint32_t,
+      ID3D12Resource*, uint32_t, int,
       const NRLiveDlssNrSettings*, NRLiveDlssNrFlushCallback, void*);
   using ErrorFn = const char* (*)(void*);
 
