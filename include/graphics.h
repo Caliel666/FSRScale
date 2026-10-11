@@ -29,7 +29,9 @@ public:
   ID3D12Device* device() const { return m_dev.Get(); }
   IDXGISwapChain4* swapChain() const { return m_swap.Get(); }
   ID3D12CommandQueue* queue() const { return m_queue.Get(); }
-  ID3D12GraphicsCommandList* cmd() const { return (m_interopContinuation ? m_cmdContinuation : m_cmd).Get(); }
+  ID3D12GraphicsCommandList* cmd() const {
+    return (m_interopContinuation ? m_cmdContinuation[m_frameSlot] : m_cmd[m_frameSlot]).Get();
+  }
   ID3D12Resource* backbuffer() const { return m_back[m_index].Get(); }
   ID3D12Resource* upscaleOutput() const { return m_upscaleOutput.Get(); }
   ID3D12Resource* dummyDepth() const { return m_dummyDepth.Get(); }
@@ -76,8 +78,8 @@ private:
   ComPtr<ID3D12DescriptorHeap> m_srvHeap;
   ComPtr<ID3D12CommandAllocator> m_alloc[3];
   ComPtr<ID3D12CommandAllocator> m_allocContinuation[3];
-  ComPtr<ID3D12GraphicsCommandList> m_cmd;
-  ComPtr<ID3D12GraphicsCommandList> m_cmdContinuation;
+  ComPtr<ID3D12GraphicsCommandList> m_cmd[3];
+  ComPtr<ID3D12GraphicsCommandList> m_cmdContinuation[3];
   bool m_interopContinuation = false;
   ComPtr<ID3D12Resource> m_dlssNrInput;
   std::vector<ComPtr<ID3D12Resource>> m_retiredDlssNrInputs;
