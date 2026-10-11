@@ -83,6 +83,16 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
         frame.target_state = static_cast<D3D12_RESOURCE_STATES>(colour_state);
         frame.motion = motion;
         frame.motion_state = static_cast<D3D12_RESOURCE_STATES>(motion_state);
+        // The upstream runtime expects motion vectors in normalized texture
+        // coordinates, not pixel units. Match the upstream ReShade adapter:
+        // sx=1/colour width, sy=1/colour height. Leaving the D3D12QueueFrame
+        // defaults at 1.0 turns ordinary pixel motion into enormous UV offsets,
+        // effectively invalidating temporal reprojection on almost every frame.
+        const D3D12_RESOURCE_DESC colourDesc = colour->GetDesc();
+        if (colourDesc.Width > 0 && colourDesc.Height > 0) {
+            frame.motion_scale_x = 1.0f / static_cast<float>(colourDesc.Width);
+            frame.motion_scale_y = 1.0f / static_cast<float>(colourDesc.Height);
+        }
         frame.depth = nullptr; // NRLive does not currently capture real game depth.
         frame.reset = reset_history != 0;
         const bool ok = host->session->run_d3d12_queue(frame, makeControls(*settings));
