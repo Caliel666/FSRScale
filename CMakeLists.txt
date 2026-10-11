@@ -48,6 +48,7 @@ add_executable(NRLive WIN32
   src/capture.cpp
   src/fsr.cpp
   src/dlssnr.cpp
+  src/dlssnr_stabilizer.cpp
   src/amdof.cpp
   src/fastmv.cpp
   src/ui.cpp
