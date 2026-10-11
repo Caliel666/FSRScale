@@ -430,9 +430,9 @@ static void paintSettings(HWND h, HDC dc) {
     swprintf_s(value, L"Temporal history: %.2f", g_dlssNr.historyStrength); drawText(dc, value, 24, 322, 13, C_TEXT, false);
     swprintf_s(value, L"Local tone: %.2f", g_dlssNr.localTone); drawText(dc, value, 24, 372, 13, C_TEXT, false);
     swprintf_s(value, L"Highlight guard (max ratio): %.2f", g_dlssNr.maxRatio); drawText(dc, value, 24, 422, 13, C_TEXT, false);
-    drawText(dc, L"Colour 0 preserves the game's hue; 1 uses full neural-rendered colour.", 24, 612, 10, C_DIM, false);
-    drawText(dc, L"Model weights are not included; see the DLSSNR setup instructions.", 24, 626, 10, C_DIM, false);
-    drawText(dc, g_saveStatus.c_str(), 24, 646, 10, C_MUTED, false);
+    drawText(dc, L"Colour 0 preserves source chroma; 1 uses neural chroma.", 24, 676, 10, C_DIM, false);
+    drawText(dc, L"Model weights are not included; see the DLSSNR setup instructions.", 24, 692, 10, C_DIM, false);
+    drawText(dc, g_saveStatus.c_str(), 24, 712, 10, C_MUTED, false);
     return;
   }
   section(L"FPS OVERLAY",58);
@@ -474,7 +474,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           else { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
             wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
             SendMessageW(GetDlgItem(g_settings, 207), CB_SETCURSEL, g_frameLimit.method, 0);
-            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-680)/2, 480, 680, SWP_NOACTIVATE|SWP_SHOWWINDOW);
+            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-740)/2, 480, 740, SWP_NOACTIVATE|SWP_SHOWWINDOW);
             InvalidateRect(g_settings, nullptr, TRUE); } }
         InvalidateRect(h, nullptr, FALSE); UpdateWindow(h); return 0;
       }
@@ -787,7 +787,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   // Settings panel
   { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
     g_settings = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, SET_CLS, L"",
-      WS_POPUP, (sw-480)/2, (sh-680)/2, 480, 680, nullptr, nullptr, inst, nullptr); }
+      WS_POPUP, (sw-480)/2, (sh-740)/2, 480, 740, nullptr, nullptr, inst, nullptr); }
 
   if (g_settings) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 84, 80, 22, g_settings, (HMENU)101, inst, nullptr);
@@ -807,8 +807,8 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     makeNrSlider(519, 418, 100, 800, (int)std::lround(g_dlssNr.maxRatio * 100));
     makeNrSlider(521, 468, 1, 4, g_dlssNr.passes);
      makeNrSlider(522, 518, 0, 100, (int)std::lround(g_dlssNr.colorStrength * 100));
-    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 508, 200, 22, g_settings, (HMENU)516, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 538, 300, 22, g_settings, (HMENU)517, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 568, 200, 22, g_settings, (HMENU)516, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 598, 300, 22, g_settings, (HMENU)517, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 110, 84, 100, 22, g_settings, (HMENU)102, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 216, 84, 80, 22, g_settings, (HMENU)103, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 302, 84, 100, 22, g_settings, (HMENU)104, inst, nullptr);
@@ -850,7 +850,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
       WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 462, 340, 24, g_settings, (HMENU)203, inst, nullptr);
     CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 462, 80, 24, g_settings, (HMENU)204, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)205, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 342, 578, 112, 30, g_settings, (HMENU)520, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 342, 632, 112, 30, g_settings, (HMENU)520, inst, nullptr);
     CheckDlgButton(g_settings, 101, g_cfg.fps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 102, g_cfg.frametime ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 103, g_cfg.frame_timing ? BST_CHECKED : BST_UNCHECKED);
