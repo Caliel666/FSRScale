@@ -5,6 +5,12 @@
 #include <dxgi1_6.h>
 #include <stdint.h>
 
+#ifdef NR_LIVE_DLSSNR_BRIDGE_EXPORTS
+#define NRLIVE_DLSSNR_API __declspec(dllexport)
+#else
+#define NRLIVE_DLSSNR_API __declspec(dllimport)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,9 +30,9 @@ typedef void (*NRLiveDlssNrFlushCallback)(void* user_data);
 
 // Root is the NRLive package directory containing dlssnr-amd/shaders and
 // dlssnr-amd/dlssnr.bin. The model is not bundled; see docs/dlssnr-integration.md.
-__declspec(dllimport) void* NRLiveDlssNrCreate(const wchar_t* root);
-__declspec(dllimport) void NRLiveDlssNrDestroy(void* session);
-__declspec(dllimport) int NRLiveDlssNrProcess(
+NRLIVE_DLSSNR_API void* NRLiveDlssNrCreate(const wchar_t* root);
+NRLIVE_DLSSNR_API void NRLiveDlssNrDestroy(void* session);
+NRLIVE_DLSSNR_API int NRLiveDlssNrProcess(
     void* session,
     ID3D12Device* device,
     ID3D12CommandQueue* queue,
@@ -38,7 +44,7 @@ __declspec(dllimport) int NRLiveDlssNrProcess(
     const NRLiveDlssNrSettings* settings,
     NRLiveDlssNrFlushCallback flush,
     void* flush_user_data);
-__declspec(dllimport) const char* NRLiveDlssNrLastError(void* session);
+NRLIVE_DLSSNR_API const char* NRLiveDlssNrLastError(void* session);
 
 #ifdef __cplusplus
 }
