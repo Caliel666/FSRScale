@@ -508,6 +508,23 @@ static void drawOwnerButton(DRAWITEMSTRUCT* dis, const wchar_t* label, bool chec
   drawText(dc,label,box.right+8,r.top,13,C_TEXT,false);
 }
 
+static void setSettingsTab(HWND h, bool dlssNr) {
+  // Native child controls stay visible independently of the parent's custom
+  // paint path. Toggle both complete control sets, not just the NR controls.
+  static constexpr int generalIds[] = {
+    101,102,103,104,105,106,
+    201,202,203,204,205,206,207,208,
+    301,302,303,401,402,403,
+    601,602,603,604,605,606,607,608
+  };
+  for (int id : generalIds)
+    if (HWND control = GetDlgItem(h, id))
+      ShowWindow(control, dlssNr ? SW_HIDE : SW_SHOW);
+  for (int id = 510; id <= 519; ++id)
+    if (HWND control = GetDlgItem(h, id))
+      ShowWindow(control, dlssNr ? SW_SHOW : SW_HIDE);
+}
+
 static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   if (m == WM_DRAWITEM) {
     DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)l;
@@ -571,13 +588,13 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     if (p.y < 48 && p.x >= 244 && p.x < 336) {
       g_dlssNrTab = false;
-      for (int id = 510; id <= 519; ++id) if (GetDlgItem(h, id)) ShowWindow(GetDlgItem(h, id), SW_HIDE);
-      InvalidateRect(h, nullptr, TRUE); return 0;
+      setSettingsTab(h, false);
+      InvalidateRect(h, nullptr, TRUE); UpdateWindow(h); return 0;
     }
     if (p.y < 48 && p.x >= 344 && p.x < 456) {
       g_dlssNrTab = true;
-      for (int id = 510; id <= 519; ++id) if (GetDlgItem(h, id)) ShowWindow(GetDlgItem(h, id), SW_SHOW);
-      InvalidateRect(h, nullptr, TRUE); return 0;
+      setSettingsTab(h, true);
+      InvalidateRect(h, nullptr, TRUE); UpdateWindow(h); return 0;
     }
     return 0;
   }
@@ -731,24 +748,24 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 216, 84, 80, 22, g_settings, (HMENU)103, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 302, 84, 100, 22, g_settings, (HMENU)104, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 112, 100, 22, g_settings, (HMENU)105, inst, nullptr);
-    CreateWindowW(L"STATIC", L"Font size:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 178, 70, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Font size:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 178, 70, 18, g_settings, (HMENU)601, inst, nullptr);
     CreateWindowW(L"STATIC", L"24", WS_CHILD|WS_VISIBLE|SS_LEFT|SS_CENTER, 410, 178, 30, 18, g_settings, (HMENU)301, inst, nullptr);
     CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|WS_VISIBLE|TBS_NOTICKS|TBS_AUTOTICKS, 100, 174, 300, 26, g_settings, (HMENU)201, inst, nullptr);
     SendMessageW(GetDlgItem(g_settings, 201), TBM_SETRANGE, TRUE, MAKELONG(12, 48));
     SendMessageW(GetDlgItem(g_settings, 201), TBM_SETPOS, TRUE, g_cfg.fontSize);
-    CreateWindowW(L"STATIC", L"Bg alpha:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 214, 70, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Bg alpha:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 214, 70, 18, g_settings, (HMENU)602, inst, nullptr);
     CreateWindowW(L"STATIC", L"50%", WS_CHILD|WS_VISIBLE|SS_LEFT|SS_CENTER, 410, 214, 30, 18, g_settings, (HMENU)302, inst, nullptr);
     CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|WS_VISIBLE|TBS_NOTICKS|TBS_AUTOTICKS, 100, 210, 300, 26, g_settings, (HMENU)202, inst, nullptr);
     SendMessageW(GetDlgItem(g_settings, 202), TBM_SETRANGE, TRUE, MAKELONG(0, 100));
     SendMessageW(GetDlgItem(g_settings, 202), TBM_SETPOS, TRUE, (int)(g_cfg.background_alpha*100));
-    CreateWindowW(L"STATIC", L"Engine:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 250, 50, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Engine:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 250, 50, 18, g_settings, (HMENU)603, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 80, 246, 40, 22, g_settings, (HMENU)401, inst, nullptr);
-    CreateWindowW(L"STATIC", L"Text:", WS_CHILD|WS_VISIBLE|SS_LEFT, 130, 250, 40, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Text:", WS_CHILD|WS_VISIBLE|SS_LEFT, 130, 250, 40, 18, g_settings, (HMENU)604, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 174, 246, 40, 22, g_settings, (HMENU)402, inst, nullptr);
-    CreateWindowW(L"STATIC", L"Graph:", WS_CHILD|WS_VISIBLE|SS_LEFT, 224, 250, 40, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Graph:", WS_CHILD|WS_VISIBLE|SS_LEFT, 224, 250, 40, 18, g_settings, (HMENU)605, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 268, 246, 40, 22, g_settings, (HMENU)403, inst, nullptr);
     // FSR sharpening slider belongs to overlay settings.
-    CreateWindowW(L"STATIC", L"Sharpening amount", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 306, 130, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Sharpening amount", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 306, 130, 18, g_settings, (HMENU)606, inst, nullptr);
     wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
     CreateWindowW(L"STATIC", sharpText, WS_CHILD|WS_VISIBLE|SS_LEFT, 410, 306, 40, 18, g_settings, (HMENU)303, inst, nullptr);
     CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|WS_VISIBLE|TBS_NOTICKS|TBS_AUTOTICKS, 24, 326, 430, 26, g_settings, (HMENU)208, inst, nullptr);
@@ -756,14 +773,14 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     SendMessageW(GetDlgItem(g_settings, 208), TBM_SETPOS, TRUE, (int)std::lround(g_sharpness * 100.0f));
     // Frame limiter controls
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 376, 100, 22, g_settings, (HMENU)106, inst, nullptr);
-     CreateWindowW(L"STATIC", L"Cap FPS", WS_CHILD|WS_VISIBLE|SS_LEFT, 142, 378, 52, 18, g_settings, nullptr, inst, nullptr);
+     CreateWindowW(L"STATIC", L"Cap FPS", WS_CHILD|WS_VISIBLE|SS_LEFT, 142, 378, 52, 18, g_settings, (HMENU)607, inst, nullptr);
      CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD|WS_VISIBLE|ES_NUMBER|ES_AUTOHSCROLL, 196, 374, 58, 24, g_settings, (HMENU)206, inst, nullptr);
      HWND methodBox = CreateWindowW(L"COMBOBOX", L"", WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL, 266, 374, 188, 120, g_settings, (HMENU)207, inst, nullptr);
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Early - smoother");
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Late - snappier");
      SendMessageW(methodBox, CB_SETCURSEL, g_frameLimit.method, 0);
      wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
-     CreateWindowW(L"STATIC", L"Folder:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 440, 60, 18, g_settings, nullptr, inst, nullptr);
+     CreateWindowW(L"STATIC", L"Folder:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 440, 60, 18, g_settings, (HMENU)608, inst, nullptr);
     g_pathEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_shotPath.c_str(),
       WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 462, 340, 24, g_settings, (HMENU)203, inst, nullptr);
     CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 462, 80, 24, g_settings, (HMENU)204, inst, nullptr);
