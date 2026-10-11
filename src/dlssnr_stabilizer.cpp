@@ -28,7 +28,7 @@ float3 Einv(float3 y){y=clamp(y,0,.999);return min(y/max(1-y,1e-5),1);}
  }
  output[id.xy]=float4(Einv(E(base)+stable),o.a);
  next[id.xy]=float4(stable,1);
-}";
+})";
 
 D3D12_RESOURCE_STATES kRead=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 D3D12_RESOURCE_STATES kWrite=D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
