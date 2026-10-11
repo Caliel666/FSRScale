@@ -77,6 +77,7 @@ bool DlssNrRuntime::process(Graphics& graphics, ID3D12Resource* inputColour,
   s.skin_structure = std::clamp(settings.skinStructure, -1.0f, 2.0f);
   s.history_strength = std::clamp(settings.historyStrength, 0.0f, 1.0f);
   s.automatic_skin_mask = settings.automaticSkinMask ? 1 : 0;
+  s.passes = std::clamp(settings.passes, 1, 4);
 
   FlushContext flush{&graphics, false};
   const int applied = m_process(m_session, graphics.device(), graphics.queue(),
