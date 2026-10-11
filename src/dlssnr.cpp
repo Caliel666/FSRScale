@@ -59,11 +59,12 @@ bool DlssNrRuntime::ensureLoaded() {
   return true;
 }
 
-bool DlssNrRuntime::process(Graphics& graphics, ID3D12Resource* colour,
-                            D3D12_RESOURCE_STATES colourState, ID3D12Resource* motion,
+bool DlssNrRuntime::process(Graphics& graphics, ID3D12Resource* inputColour,
+                            D3D12_RESOURCE_STATES inputColourState, ID3D12Resource* outputColour,
+                            D3D12_RESOURCE_STATES outputColourState, ID3D12Resource* motion,
                             D3D12_RESOURCE_STATES motionState, bool reset,
                             const OverlayDlssNrConfig& settings) {
-  if (!settings.enabled || !colour || !motion || !ensureLoaded()) return false;
+  if (!settings.enabled || !inputColour || !outputColour || !motion || !ensureLoaded()) return false;
 
   NRLiveDlssNrSettings s{};
   s.enabled = settings.enabled ? 1 : 0;
@@ -79,7 +80,8 @@ bool DlssNrRuntime::process(Graphics& graphics, ID3D12Resource* colour,
 
   FlushContext flush{&graphics, false};
   const int applied = m_process(m_session, graphics.device(), graphics.queue(),
-      colour, static_cast<uint32_t>(colourState), motion,
+      inputColour, static_cast<uint32_t>(inputColourState),
+      outputColour, static_cast<uint32_t>(outputColourState), motion,
       static_cast<uint32_t>(motionState), reset ? 1 : 0, &s, flushForInterop, &flush);
   if (flush.submitted && applied) {
     m_error.clear();
