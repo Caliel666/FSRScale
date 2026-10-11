@@ -520,9 +520,32 @@ static void setSettingsTab(HWND h, bool dlssNr) {
   for (int id : generalIds)
     if (HWND control = GetDlgItem(h, id))
       ShowWindow(control, dlssNr ? SW_HIDE : SW_SHOW);
-  for (int id = 510; id <= 519; ++id)
+  for (int id = 510; id <= 520; ++id)
     if (HWND control = GetDlgItem(h, id))
       ShowWindow(control, dlssNr ? SW_SHOW : SW_HIDE);
+}
+
+static void saveSettingsFromButton(HWND h) {
+  // Both tabs share the same save action and feedback path.
+  saveCfg();
+  g_saveStatus = L"Saved to scaleconfig.ini";
+  InvalidateRect(h, nullptr, FALSE);
+}
+
+static void invalidateNrValue(HWND h, int controlId) {
+  int y = 122;
+  switch (controlId) {
+    case 511: y = 122; break;
+    case 512: y = 172; break;
+    case 513: y = 222; break;
+    case 514: y = 272; break;
+    case 515: y = 322; break;
+    case 518: y = 372; break;
+    case 519: y = 422; break;
+    default: return;
+  }
+  RECT valueArea{20, y - 2, 136, y + 22};
+  InvalidateRect(h, &valueArea, FALSE);
 }
 
 static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -539,6 +562,15 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       case 510: drawOwnerButton(dis, g_dlssNr.style == 0 ? L"Style: Neutral" : g_dlssNr.style == 1 ? L"Style: Natural" : L"Style: Cinematic", true); return TRUE;
       case 516: drawOwnerButton(dis, L"Automatic skin mask", g_dlssNr.automaticSkinMask); return TRUE;
       case 517: drawOwnerButton(dis, L"Residual stabilizer (motion-only)", g_dlssNr.stabilizer); return TRUE;
+      case 520: {
+        HDC dc = dis->hDC; RECT r = dis->rcItem;
+        HBRUSH bg = CreateSolidBrush(C_RED); FillRect(dc, &r, bg); DeleteObject(bg);
+        SetBkMode(dc, TRANSPARENT); SetTextColor(dc, C_DARK);
+        HFONT font = makeFont(12, true); HFONT prior = (HFONT)SelectObject(dc, font);
+        DrawTextW(dc, L"Save settings", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(dc, prior); DeleteObject(font);
+        return TRUE;
+      }
       case 205: {
         HDC dc = dis->hDC; RECT r = dis->rcItem;
         HBRUSH bg = CreateSolidBrush(C_RED); FillRect(dc, &r, bg); DeleteObject(bg);
@@ -601,10 +633,8 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return 0;
   }
   if (m == WM_COMMAND) {
-    if (LOWORD(w) == 205 && HIWORD(w) == BN_CLICKED) {
-      saveCfg();
-      g_saveStatus = L"Saved to scaleconfig.ini";
-      InvalidateRect(h, nullptr, FALSE);
+    if ((LOWORD(w) == 205 || LOWORD(w) == 520) && HIWORD(w) == BN_CLICKED) {
+      saveSettingsFromButton(h);
       return 0;
     }
     if (LOWORD(w) == 510) {
@@ -667,25 +697,39 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     HWND ctrl = (HWND)l;
     if (ctrl == GetDlgItem(h, 511)) {
       g_dlssNr.modelScale = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
-      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 511);
     } else if (ctrl == GetDlgItem(h, 512)) {
       g_dlssNr.intensity = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
-      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 512);
     } else if (ctrl == GetDlgItem(h, 513)) {
       g_dlssNr.structure = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
-      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 513);
     } else if (ctrl == GetDlgItem(h, 514)) {
       g_dlssNr.skinStructure = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
-      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 514);
     } else if (ctrl == GetDlgItem(h, 515)) {
       g_dlssNr.historyStrength = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
-      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 515);
     } else if (ctrl == GetDlgItem(h, 518)) {
       g_dlssNr.localTone = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
-      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 518);
     } else if (ctrl == GetDlgItem(h, 519)) {
       g_dlssNr.maxRatio = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
-      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 519);
     } else if (ctrl == GetDlgItem(h, 208)) {
       g_sharpness = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
       wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
@@ -787,12 +831,14 @@ bool overlayInit(HINSTANCE inst, HWND output) {
       WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 462, 340, 24, g_settings, (HMENU)203, inst, nullptr);
     CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 462, 80, 24, g_settings, (HMENU)204, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)205, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)520, inst, nullptr);
     CheckDlgButton(g_settings, 101, g_cfg.fps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 102, g_cfg.frametime ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 103, g_cfg.frame_timing ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 104, g_cfg.resolution ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 105, g_cfg.background ? BST_CHECKED : BST_UNCHECKED);
     SetWindowTextW(g_pathEdit, g_shotPath.c_str());
+    setSettingsTab(g_settings, false);
     ShowWindow(g_settings, SW_HIDE);
   }
 
