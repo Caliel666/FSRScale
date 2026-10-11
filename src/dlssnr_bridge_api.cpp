@@ -34,13 +34,15 @@ nr::Controls makeControls(const NRLiveDlssNrSettings& s) {
     c.enabled = s.enabled != 0;
     c.apply_model = true;
     c.style = std::clamp(s.style, 0, 2);
-    c.intensity = std::clamp(s.intensity, 0.0f, 2.0f);
+    // Intensity is applied as a post-NR blend by NRLive. Feeding it into the
+    // model's internal intensity path can soften fine detail at low values.
+    c.intensity = 1.0f;
     c.local_tone = std::clamp(s.local_tone, 0.0f, 2.0f);
     c.max_ratio = std::clamp(s.max_ratio, 1.0f, 8.0f);
     c.local_structure = std::clamp(s.structure, 0.0f, 2.0f);
     c.skin_structure = std::clamp(s.skin_structure, -1.0f, 2.0f);
     c.automatic_mask = s.automatic_skin_mask != 0;
-    c.passes = 1;
+    c.passes = std::clamp(s.passes, 1, 4);
     return c;
 }
 }
@@ -75,7 +77,7 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
     try {
         host->session->set_model_scale(std::clamp(settings->model_scale, 0.25f, 1.0f));
         host->session->set_history_strength(std::clamp(settings->history_strength, 0.0f, 1.0f));
-        host->session->set_max_passes(1);
+        host->session->set_max_passes(std::clamp(settings->passes, 1, 4));
 
         nr::pe::Session::D3D12QueueFrame frame{};
         frame.device = device;
