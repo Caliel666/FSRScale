@@ -2,6 +2,7 @@
 #include "capture.h"
 #include "fsr.h"
 #include "dlssnr.h"
+#include "dlssnr_stabilizer.h"
 #include "amdof.h"
 #include "fastmv.h"
 #include "ui.h"
@@ -230,6 +231,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     Sleep(50);
 
     DlssNrRuntime dlssNr;
+    DlssNrStabilizer dlssNrStabilizer;
     std::wstring lastDlssNrError;
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
@@ -534,13 +536,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         if (motionReady) {
           const auto& nrSettings = overlayDlssNrConfig();
           if (nrSettings.enabled) {
-            const bool nrApplied = dlssNr.process(gfx, color.Get(),
+            const bool nrAvailable = dlssNr.available();
+            ID3D12Resource* originalColour = nrAvailable && nrSettings.stabilizer
+                ? gfx.snapshotDlssNrInput(color.Get(),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+                : nullptr;
+            const auto mvState = spec.motionMode == TargetSpec::MotionMode::Fast
+                ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                : (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            const bool nrApplied = nrAvailable && dlssNr.process(gfx, color.Get(),
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                mv, spec.motionMode == TargetSpec::MotionMode::Fast
-                      ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-                      : (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-                resetThisFrame, nrSettings);
+                mv, mvState, resetThisFrame, nrSettings);
             cmd = gfx.cmd(); // the bridge may have switched recording to the continuation list
+            if (nrApplied && nrSettings.stabilizer && originalColour)
+              dlssNrStabilizer.record(gfx.device(), cmd, originalColour, color.Get(), mv, mvState, resetThisFrame);
             if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
               lastDlssNrError = dlssNr.lastError();
               logMain(L"DLSSNR: " + lastDlssNrError);
