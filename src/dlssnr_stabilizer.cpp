@@ -69,7 +69,8 @@ bool DlssNrStabilizer::build(ID3D12Device* device) {
 bool DlssNrStabilizer::ensureResources(ID3D12Resource* result) {
   const auto d=result->GetDesc();
   if(d.Dimension!=D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
-     d.Format!=DXGI_FORMAT_R8G8B8A8_UNORM || d.Width>UINT_MAX || d.Height>UINT_MAX) return false;
+     (d.Format!=DXGI_FORMAT_R8G8B8A8_UNORM && d.Format!=DXGI_FORMAT_B8G8R8A8_UNORM) ||
+     d.Width>UINT_MAX || d.Height>UINT_MAX) return false;
   const UINT w=(UINT)d.Width,h=d.Height;
   if(m_width==w&&m_height==h&&m_format==d.Format&&m_output&&m_history[0]&&m_history[1])return true;
   for(auto& x:m_history)if(x)m_retired.push_back(std::move(x));
@@ -81,35 +82,34 @@ bool DlssNrStabilizer::ensureResources(ID3D12Resource* result) {
   rd.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;
   if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&rd,kRead,nullptr,IID_PPV_ARGS(&m_history[0]))))return false;
   if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&rd,kRead,nullptr,IID_PPV_ARGS(&m_history[1]))))return false;
-  rd.Format=d.Format;
+  // FP16 output avoids requiring typed-UAV support on the captured BGRA8 surface.
   if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&rd,kRead,nullptr,IID_PPV_ARGS(&m_output))))return false;
   m_width=w;m_height=h;m_format=d.Format;m_current=0;m_hasHistory=false;
   return true;
 }
 
-bool DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsCommandList* cmd,
+ID3D12Resource* DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsCommandList* cmd,
     ID3D12Resource* original,ID3D12Resource* result,ID3D12Resource* motion,
     D3D12_RESOURCE_STATES motionState,bool resetHistory) {
-  if(!device||!cmd||!original||!result||!motion||!build(device)||!ensureResources(result))return false;
+  if(!device||!cmd||!original||!result||!motion||!build(device)||!ensureResources(result))return nullptr;
   auto desc=motion->GetDesc(); if(desc.Width==0||desc.Height==0)return false;
   UINT stride=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
   auto cpu=m_heap->GetCPUDescriptorHandleForHeapStart(),gpu=m_heap->GetGPUDescriptorHandleForHeapStart();
   cpu.ptr+=SIZE_T(m_set)*kViews*stride; gpu.ptr+=UINT64(m_set)*kViews*stride;
   auto srv=[&](ID3D12Resource* r,DXGI_FORMAT fmt){D3D12_SHADER_RESOURCE_VIEW_DESC v{};v.Format=fmt;v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;v.Texture2D.MipLevels=1;device->CreateShaderResourceView(r,&v,cpu);cpu.ptr+=stride;};
   auto uav=[&](ID3D12Resource* r,DXGI_FORMAT fmt){D3D12_UNORDERED_ACCESS_VIEW_DESC v{};v.Format=fmt;v.ViewDimension=D3D12_UAV_DIMENSION_TEXTURE2D;device->CreateUnorderedAccessView(r,nullptr,&v,cpu);cpu.ptr+=stride;};
-  srv(original,DXGI_FORMAT_R8G8B8A8_UNORM);srv(result,DXGI_FORMAT_R8G8B8A8_UNORM);
+  const DXGI_FORMAT colourFormat=result->GetDesc().Format;
+  srv(original,colourFormat);srv(result,colourFormat);
   srv(motion,DXGI_FORMAT_R16G16_FLOAT);srv(m_history[m_current].Get(),DXGI_FORMAT_R16G16B16A16_FLOAT);
-  uav(m_output.Get(),DXGI_FORMAT_R8G8B8A8_UNORM);uav(m_history[1-m_current].Get(),DXGI_FORMAT_R16G16B16A16_FLOAT);
+  uav(m_output.Get(),DXGI_FORMAT_R16G16B16A16_FLOAT);uav(m_history[1-m_current].Get(),DXGI_FORMAT_R16G16B16A16_FLOAT);
   barrier(cmd,result,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,kRead);
   barrier(cmd,motion,motionState,kRead);barrier(cmd,m_output.Get(),kRead,kWrite);barrier(cmd,m_history[1-m_current].Get(),kRead,kWrite);
   ID3D12DescriptorHeap* heaps[]={m_heap.Get()};cmd->SetDescriptorHeaps(1,heaps);
   cmd->SetComputeRootSignature(m_root.Get());cmd->SetPipelineState(m_pipeline.Get());cmd->SetComputeRootDescriptorTable(0,gpu);
   struct Params{UINT w,h,mvW,mvH;float alpha,delta;UINT validHistory,pad;} p{m_width,m_height,(UINT)desc.Width,(UINT)desc.Height,0.45f,6.0f/255.0f,(m_hasHistory&&!resetHistory)?1u:0u,0};
   cmd->SetComputeRoot32BitConstants(1,8,&p,0);cmd->Dispatch((m_width+7)/8,(m_height+7)/8,1);
-  barrier(cmd,m_output.Get(),kWrite,D3D12_RESOURCE_STATE_COPY_SOURCE);
-  barrier(cmd,result,kRead,D3D12_RESOURCE_STATE_COPY_DEST);cmd->CopyResource(result,m_output.Get());
-  barrier(cmd,result,D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-  barrier(cmd,m_output.Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,kRead);
+  barrier(cmd,result,kRead,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  barrier(cmd,m_output.Get(),kWrite,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   barrier(cmd,m_history[1-m_current].Get(),kWrite,kRead);barrier(cmd,motion,kRead,motionState);
-  m_current=1-m_current;m_set=(m_set+1)%kSets;m_hasHistory=true;return true;
+  m_current=1-m_current;m_set=(m_set+1)%kSets;m_hasHistory=true;return m_output.Get();
 }
