@@ -1,6 +1,7 @@
 #include "graphics.h"
 #include "capture.h"
 #include "fsr.h"
+#include "dlssnr.h"
 #include "amdof.h"
 #include "fastmv.h"
 #include "ui.h"
@@ -228,6 +229,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     // It loads as dxgi.dll and attaches on CreateDevice/CreateSwapChain (already done).
     Sleep(50);
 
+    DlssNrRuntime dlssNr;
+    std::wstring lastDlssNrError;
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
     logMain(fsrOk ? L"FSR upscaler init OK: " + fsr.lastError() : L"FSR upscaler init FAILED: " + fsr.lastError());
@@ -522,6 +525,26 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         } else {
           amdof.dispatch(cmd, color.Get(), mv, cs, reset);
           motionReady = true;
+        }
+
+        // DLSSNR runs after the same-frame motion vectors are ready and before FSR
+        // consumes colour. Its native D3D12/Vulkan bridge submits the current
+        // command list, signals/waits on shared GPU fences, and resumes recording
+        // on a second allocator/list; no CPU readback or GPU-completion wait.
+        if (motionReady) {
+          const auto& nrSettings = overlayDlssNrConfig();
+          if (nrSettings.enabled) {
+            const bool nrApplied = dlssNr.process(gfx, color.Get(),
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                mv, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, resetThisFrame, nrSettings);
+            cmd = gfx.cmd(); // the bridge may have switched recording to the continuation list
+            if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
+              lastDlssNrError = dlssNr.lastError();
+              logMain(L"DLSSNR: " + lastDlssNrError);
+            } else if (nrApplied) {
+              lastDlssNrError.clear();
+            }
+          }
         }
 
         // FastMv writes both resources as UAV. FSR consumes them as SRVs.
