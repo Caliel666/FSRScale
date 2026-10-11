@@ -98,7 +98,7 @@ bool DlssNrStabilizer::ensureResources(ID3D12Resource* result) {
 
 ID3D12Resource* DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsCommandList* cmd,
     ID3D12Resource* original,ID3D12Resource* result,ID3D12Resource* motion,
-    D3D12_RESOURCE_STATES motionState,bool resetHistory) {
+    D3D12_RESOURCE_STATES motionState,bool resetHistory,float stabilizerStrength,float colorStrength) {
   if(!device||!cmd||!original||!result||!motion||!build(device)||!ensureResources(result))return nullptr;
   auto desc=motion->GetDesc(); if(desc.Width==0||desc.Height==0)return nullptr;
   UINT stride=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
