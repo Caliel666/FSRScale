@@ -30,6 +30,16 @@ elif new not in s:
 
 p = Path("windows/src/pe/nr_pe_session.cpp")
 s = p.read_text()
+# NRLive is an external post-process, not the game itself. The upstream 1 GiB
+# VRAM / 3 GiB commit reserves reject a 793 MiB model on machines with 1.8 GiB
+# VRAM and 2.9 GiB commit free, even though the allocation would fit. Keep
+# headroom for the game while allowing the bridge to use a realistic reserve.
+reserve_old = "constexpr uint64_t kVramReserve = 1024ull << 20, kCommitReserve = 3072ull << 20;"
+reserve_new = "constexpr uint64_t kVramReserve = 512ull << 20, kCommitReserve = 1024ull << 20;"
+if reserve_old in s:
+    s = s.replace(reserve_old, reserve_new, 1)
+elif reserve_new not in s:
+    raise SystemExit("Could not patch upstream DLSSNR memory guard reserves")
 old = """    in.target = f.target; in.target_state = f.target_state;
     in.motion = f.motion; in.motion_state = f.motion_state;"""
 new = """    in.target = f.target; in.target_state = f.target_state;
