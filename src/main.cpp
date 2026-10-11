@@ -528,6 +528,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         // new quarter-resolution screen-space estimator.
         bool motionReady = false;
         bool reactiveReady = false;
+        ID3D12Resource* nrStabilizedColour = nullptr;
         if (spec.motionMode == TargetSpec::MotionMode::Fast) {
           motionReady = fastmv.dispatch(cmd, color.Get(), mv, reactive, cs, reset);
           reactiveReady = motionReady;
@@ -556,7 +557,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
                 mv, mvState, resetThisFrame, nrSettings);
             cmd = gfx.cmd(); // the bridge may have switched recording to the continuation list
             if (nrApplied && nrSettings.stabilizer && originalColour)
-              dlssNrStabilizer.record(gfx.device(), cmd, originalColour, color.Get(), mv, mvState, resetThisFrame);
+              nrStabilizedColour = dlssNrStabilizer.record(gfx.device(), cmd, originalColour, color.Get(), mv, mvState, resetThisFrame);
             if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
               lastDlssNrError = dlssNr.lastError();
               logMain(L"DLSSNR: " + lastDlssNrError);
@@ -588,11 +589,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
         // FSR dispatch (reads color/depth/mv as SRV, writes upscale as UAV).
         // No barrier needed for mv — AMDOF left it in PS|NPS.
-        usedFsr = motionReady && fsr.dispatch(cmd, color.Get(), depth, mv,
+        ID3D12Resource* fsrInputColour = nrStabilizedColour ? nrStabilizedColour : color.Get();
+        usedFsr = motionReady && fsr.dispatch(cmd, fsrInputColour, depth, mv,
                                               reactiveReady ? reactive : nullptr,
                                               upscale, cs, display, dt, reset);
         reset = false;
-        presentSrc = usedFsr ? upscale : color.Get();
+        presentSrc = usedFsr ? upscale : fsrInputColour;
 
         // ---- Batch C: post-FSR cleanup + presentation prep ----------------
         //   upscale: UAV -> PS|NPS (if usedFsr, blit reads as SRV)
