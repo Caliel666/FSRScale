@@ -357,17 +357,12 @@ bool Graphics::init(HWND output, Size render, Size display)
   createAuxTextures(render.w ? render : display);
   createBlitPipeline();
 
-  // One command list per allocator slot. A single shared list cannot be
-  // Reset while the GPU is still executing a prior recording; under FSR FG
-  // that stall serializes every base frame and halves the input rate.
-  for (int i = 0; i < 3; ++i) {
-    hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_alloc[i].Get(),
-                                nullptr, IID_PPV_ARGS(&m_cmd[i])));
-    hr(m_cmd[i]->Close());
-    hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocContinuation[i].Get(),
-                                nullptr, IID_PPV_ARGS(&m_cmdContinuation[i])));
-    hr(m_cmdContinuation[i]->Close());
-  }
+  hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_alloc[0].Get(),
+                              nullptr, IID_PPV_ARGS(&m_cmd)));
+  hr(cmd()->Close());
+  hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocContinuation[0].Get(),
+                              nullptr, IID_PPV_ARGS(&m_cmdContinuation)));
+  hr(m_cmdContinuation->Close());
   hr(m_dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
   m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   return true;
@@ -385,8 +380,7 @@ bool Graphics::begin()
   }
   m_interopContinuation = false;
   m_alloc[m_frameSlot]->Reset();
-  // Reset the list that owns this slot; cmd() now resolves to m_cmd[slot].
-  hr(m_cmd[m_frameSlot]->Reset(m_alloc[m_frameSlot].Get(), nullptr));
+  cmd()->Reset(m_alloc[m_frameSlot].Get(), nullptr);
 
   // The capture pipeline has no real game depth. Always clear the synthetic
   // depth to deterministic far depth before FSR sees it; an uninitialized
@@ -405,19 +399,18 @@ bool Graphics::begin()
 
 bool Graphics::submitForInterop()
 {
-  if (m_interopContinuation || !m_cmd[m_frameSlot] || !m_cmdContinuation[m_frameSlot] || !m_queue)
+  if (m_interopContinuation || !m_cmd || !m_cmdContinuation || !m_queue)
     return false;
-  if (FAILED(m_cmd[m_frameSlot]->Close()))
+  if (FAILED(cmd()->Close()))
     return false;
-  ID3D12CommandList* lists[] = { m_cmd[m_frameSlot].Get() };
+  ID3D12CommandList* lists[] = { cmd() };
   m_queue->ExecuteCommandLists(1, lists);
 
-  // The second allocator/list pair for this slot records the post-NR FSR
-  // work. The queue bridge inserts its own GPU fence wait; there is no CPU
-  // wait in this path.
+  // The second allocator/list pair records the post-NR FSR work. The queue
+  // bridge inserts its own GPU fence wait; there is no CPU wait in this path.
   if (FAILED(m_allocContinuation[m_frameSlot]->Reset()))
     return false;
-  if (FAILED(m_cmdContinuation[m_frameSlot]->Reset(m_allocContinuation[m_frameSlot].Get(), nullptr)))
+  if (FAILED(m_cmdContinuation->Reset(m_allocContinuation[m_frameSlot].Get(), nullptr)))
     return false;
   m_interopContinuation = true;
   return true;
@@ -489,7 +482,7 @@ void Graphics::end() { cmd()->Close(); }
 
 bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t frameIndex)
 {
-  if (!cmd() || !m_back[m_index] || m_screenshotPending)
+  if (!m_cmd || !m_back[m_index] || m_screenshotPending)
     return false;
 
   ID3D12Resource* back = m_back[m_index].Get();
@@ -652,10 +645,9 @@ static bool writeScreenshotPng(const std::wstring& folder,
 
 bool Graphics::present()
 {
-  // submitForInterop() may have already submitted m_cmd[slot] and continued
-  // the frame on m_cmdContinuation[slot]. Present must execute the currently
-  // active list for this slot, not replay an already-submitted list or touch
-  // another slot's in-flight recording.
+  // submitForInterop() may have already submitted m_cmd and continued the
+  // frame on m_cmdContinuation. Present must execute the currently active
+  // list, not replay the already-submitted original list.
   ID3D12CommandList* lists[] = { cmd() };
   m_queue->ExecuteCommandLists(1, lists);
   // Sync interval 0 = no vsync wait on CPU.
