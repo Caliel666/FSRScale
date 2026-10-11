@@ -79,20 +79,23 @@ bool DlssNrRuntime::process(Graphics& graphics, ID3D12Resource* colour,
   const int applied = m_process(m_session, graphics.device(), graphics.queue(),
       colour, static_cast<uint32_t>(colourState), motion,
       static_cast<uint32_t>(motionState), reset ? 1 : 0, &s, flushForInterop, &flush);
-  if (flush.submitted) {
+  if (flush.submitted && applied) {
     m_error.clear();
-    return applied != 0;
+    return true;
   }
   if (m_getError && m_session) {
     const char* e = m_getError(m_session);
     if (e && *e) {
       const int n = MultiByteToWideChar(CP_UTF8, 0, e, -1, nullptr, 0);
       if (n > 1) {
-        m_error.resize(n - 1);
+        m_error.resize(n);
         MultiByteToWideChar(CP_UTF8, 0, e, -1, m_error.data(), n);
+        m_error.pop_back();
       }
     }
   }
+  if (m_error.empty() && flush.submitted && !applied)
+    m_error = L"DLSSNR could not process this frame; FSR is continuing with the original colour.";
   return false;
 }
 
