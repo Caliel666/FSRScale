@@ -47,6 +47,7 @@ add_executable(NRLive WIN32
   src/graphics.cpp
   src/capture.cpp
   src/fsr.cpp
+  src/dlssnr.cpp
   src/amdof.cpp
   src/fastmv.cpp
   src/ui.cpp
