@@ -49,6 +49,9 @@ static bool g_toggleFsr = false, g_screenshot = false, g_toggleFrameLimit = fals
 static OverlayFrameLimitConfig g_frameLimit{};
 static bool g_fgEnabled = false;
 static bool g_fgActive = false;
+static bool g_toggleDlssNr = false;
+static bool g_dlssNrTab = false;
+static OverlayDlssNrConfig g_dlssNr{};
 static float g_sharpness = 0.65f;
 static OverlayHudConfig g_cfg{};
 static std::wstring g_shotPath;
@@ -78,6 +81,15 @@ static void loadCfg() {
   g_frameLimit.fps = frame_limit::clampFps(GetPrivateProfileIntW(L"FrameLimiter", L"fps", 60, ini.c_str()));
   g_frameLimit.method = frame_limit::normalizeMethod(GetPrivateProfileIntW(L"FrameLimiter", L"method", 0, ini.c_str()));
   g_fgEnabled = GetPrivateProfileIntW(L"FrameGeneration", L"enabled", 0, ini.c_str()) != 0;
+  g_dlssNr.enabled = GetPrivateProfileIntW(L"DLSSNR", L"enabled", 0, ini.c_str()) != 0;
+  g_dlssNr.modelScale = std::clamp(GetPrivateProfileIntW(L"DLSSNR", L"scale", 100, ini.c_str()), 25, 100) / 100.0f;
+  g_dlssNr.style = std::clamp(GetPrivateProfileIntW(L"DLSSNR", L"style", 0, ini.c_str()), 0, 2);
+  g_dlssNr.intensity = std::clamp(GetPrivateProfileIntW(L"DLSSNR", L"intensity", 100, ini.c_str()), 0, 200) / 100.0f;
+  g_dlssNr.structure = std::clamp(GetPrivateProfileIntW(L"DLSSNR", L"structure", 100, ini.c_str()), 0, 200) / 100.0f;
+  g_dlssNr.skinStructure = std::clamp(GetPrivateProfileIntW(L"DLSSNR", L"skin_structure", -100, ini.c_str()), -100, 200) / 100.0f;
+  g_dlssNr.historyStrength = std::clamp(GetPrivateProfileIntW(L"DLSSNR", L"history_strength", 80, ini.c_str()), 0, 100) / 100.0f;
+  g_dlssNr.automaticSkinMask = GetPrivateProfileIntW(L"DLSSNR", L"automatic_skin_mask", 1, ini.c_str()) != 0;
+  g_dlssNr.stabilizer = GetPrivateProfileIntW(L"DLSSNR", L"stabilizer", 0, ini.c_str()) != 0;
   g_sharpness = std::clamp(GetPrivateProfileIntW(L"FSR", L"sharpness", 65, ini.c_str()) / 100.0f, 0.0f, 1.0f);
   g_cfg.fps = GetPrivateProfileIntW(L"FPS", L"fps", 1, ini.c_str()) != 0;
   g_cfg.frametime = GetPrivateProfileIntW(L"FPS", L"frametime", 1, ini.c_str()) != 0;
@@ -115,6 +127,16 @@ static void saveCfg() {
   swprintf_s(limitValue, L"%d", g_frameLimit.fps); WritePrivateProfileStringW(L"FrameLimiter", L"fps", limitValue, ini.c_str());
   swprintf_s(limitValue, L"%d", g_frameLimit.method); WritePrivateProfileStringW(L"FrameLimiter", L"method", limitValue, ini.c_str());
   WritePrivateProfileStringW(L"FrameGeneration", L"enabled", g_fgEnabled ? L"1" : L"0", ini.c_str());
+  WritePrivateProfileStringW(L"DLSSNR", L"enabled", g_dlssNr.enabled ? L"1" : L"0", ini.c_str());
+  wchar_t nrValue[32]{};
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.modelScale * 100)); WritePrivateProfileStringW(L"DLSSNR", L"scale", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", g_dlssNr.style); WritePrivateProfileStringW(L"DLSSNR", L"style", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.intensity * 100)); WritePrivateProfileStringW(L"DLSSNR", L"intensity", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.structure * 100)); WritePrivateProfileStringW(L"DLSSNR", L"structure", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.skinStructure * 100)); WritePrivateProfileStringW(L"DLSSNR", L"skin_structure", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.historyStrength * 100)); WritePrivateProfileStringW(L"DLSSNR", L"history_strength", nrValue, ini.c_str());
+  WritePrivateProfileStringW(L"DLSSNR", L"automatic_skin_mask", g_dlssNr.automaticSkinMask ? L"1" : L"0", ini.c_str());
+  WritePrivateProfileStringW(L"DLSSNR", L"stabilizer", g_dlssNr.stabilizer ? L"1" : L"0", ini.c_str());
   wchar_t sharpnessValue[16]{}; swprintf_s(sharpnessValue, L"%d", (int)std::lround(g_sharpness * 100.0f));
   WritePrivateProfileStringW(L"FSR", L"sharpness", sharpnessValue, ini.c_str());
 }
@@ -180,6 +202,7 @@ static void drawBtnIcon(HDC dc, RECT r, int kind, bool active) {
     SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(p);
   } else if (kind == 3) { RECT tr{cx-24, cy-8, cx+24, cy+8}; DrawTextW(dc, L"CAP", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
   } else if (kind == 4) { RECT tr{cx-22, cy-8, cx+22, cy+8}; DrawTextW(dc, L"FG", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+  } else if (kind == 5) { RECT tr{cx-22, cy-8, cx+22, cy+8}; DrawTextW(dc, L"NR", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
   } else { // Settings gear
     HPEN p = CreatePen(PS_SOLID, 2, c);
     auto op = (HPEN)SelectObject(dc, p);
@@ -205,9 +228,9 @@ static void paintTopBar(HWND h, HDC dc) {
   RECT rc{}; GetClientRect(h, &rc);
   HBRUSH bg = CreateSolidBrush(C_WIN);
   FillRect(dc, &rc, bg); DeleteObject(bg);
-  for (int i = 0; i < 6; ++i) {
+  for (int i = 0; i < 7; ++i) {
     RECT b = btnRect(i);
-    bool active = (i==0&&g_fsr) || (i==1&&g_fpsVisible) || (i==3&&g_frameLimit.enabled) || (i==4&&g_fgEnabled) || (i==5&&IsWindowVisible(g_settings));
+    bool active = (i==0&&g_fsr) || (i==1&&g_fpsVisible) || (i==3&&g_frameLimit.enabled) || (i==4&&g_fgEnabled) || (i==5&&g_dlssNr.enabled) || (i==6&&IsWindowVisible(g_settings));
     bool hot = (g_hoverBtn == i);
     HBRUSH br = CreateSolidBrush(active ? C_RED_TINT : (hot ? C_HOVER : C_GHOST));
     roundRect(dc, b, 6, br); DeleteObject(br);
@@ -380,6 +403,25 @@ static void paintSettings(HWND h, HDC dc) {
   HFONT title=makeFont(18,true); auto old=(HFONT)SelectObject(dc,title); SetBkMode(dc,TRANSPARENT); SetTextColor(dc,C_TEXT);
   RECT rt{24,10,rc.right-24,40}; DrawTextW(dc,L"NRLive Settings",-1,&rt,DT_LEFT|DT_VCENTER|DT_SINGLELINE); SelectObject(dc,old); DeleteObject(title);
   auto section=[&](const wchar_t* s,int y){HFONT f=makeFont(12,true);auto o=(HFONT)SelectObject(dc,f);SetTextColor(dc,C_RED);RECT r{24,y,rc.right-24,y+18};DrawTextW(dc,s,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);HPEN p=CreatePen(PS_SOLID,1,C_CARD2);auto op=(HPEN)SelectObject(dc,p);MoveToEx(dc,24,y+21,nullptr);LineTo(dc,rc.right-24,y+21);SelectObject(dc,op);DeleteObject(p);SelectObject(dc,o);DeleteObject(f);};
+  RECT tabGeneral{244, 10, 336, 38}, tabNr{344, 10, 456, 38};
+  HBRUSH tg = CreateSolidBrush(g_dlssNrTab ? C_GHOST : C_RED_TINT); FillRect(dc, &tabGeneral, tg); DeleteObject(tg);
+  HBRUSH tn = CreateSolidBrush(g_dlssNrTab ? C_RED_TINT : C_GHOST); FillRect(dc, &tabNr, tn); DeleteObject(tn);
+  drawText(dc, L"General", 260, 16, 12, C_TEXT, false);
+  drawText(dc, L"DLSSNR", 370, 16, 12, C_TEXT, false);
+  if (g_dlssNrTab) {
+    section(L"DLSSNR - BEFORE FSR", 58);
+    wchar_t value[80]{};
+    swprintf_s(value, L"Style: %s (click to cycle)", g_dlssNr.style == 0 ? L"Neutral" : g_dlssNr.style == 1 ? L"Natural" : L"Cinematic");
+    drawText(dc, value, 24, 86, 13, C_TEXT, false);
+    swprintf_s(value, L"Model scale: %.2f", g_dlssNr.modelScale); drawText(dc, value, 24, 122, 13, C_TEXT, false);
+    swprintf_s(value, L"Intensity: %.2f", g_dlssNr.intensity); drawText(dc, value, 24, 172, 13, C_TEXT, false);
+    swprintf_s(value, L"Structure: %.2f", g_dlssNr.structure); drawText(dc, value, 24, 222, 13, C_TEXT, false);
+    swprintf_s(value, L"Skin structure: %.2f", g_dlssNr.skinStructure); drawText(dc, value, 24, 272, 13, C_TEXT, false);
+    swprintf_s(value, L"Temporal history: %.2f", g_dlssNr.historyStrength); drawText(dc, value, 24, 322, 13, C_TEXT, false);
+    drawText(dc, L"Model weights are not included; see the DLSSNR setup instructions.", 24, 438, 10, C_DIM, false);
+    drawText(dc, g_saveStatus.c_str(), 24, 564, 10, C_MUTED, false);
+    return;
+  }
   section(L"FPS OVERLAY",58);
   section(L"APPEARANCE",148);
   section(L"FSR SHARPENING",278);
@@ -406,7 +448,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   case WM_LBUTTONUP: {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
       RECT b = btnRect(i);
       if (PtInRect(&b, p)) {
         if (i == 0) { g_fsr = !g_fsr; g_toggleFsr = true; }
@@ -414,6 +456,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         else if (i == 2) { g_screenshot = true; }
         else if (i == 3) { g_frameLimit.enabled = !g_frameLimit.enabled; g_toggleFrameLimit = true; saveCfg(); }
         else if (i == 4) { g_fgEnabled = !g_fgEnabled; g_toggleFg = true; saveCfg(); }
+        else if (i == 5) { g_dlssNr.enabled = !g_dlssNr.enabled; g_toggleDlssNr = true; saveCfg(); }
         else { if (IsWindowVisible(g_settings)) ShowWindow(g_settings, SW_HIDE);
           else { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
             wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
@@ -470,6 +513,9 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       case 104: drawOwnerButton(dis, L"Resolution", g_cfg.resolution); return TRUE;
       case 105: drawOwnerButton(dis, L"Background", g_cfg.background); return TRUE;
       case 106: drawOwnerButton(dis, L"Enabled", g_frameLimit.enabled); return TRUE;
+      case 510: drawOwnerButton(dis, g_dlssNr.style == 0 ? L"Style: Neutral" : g_dlssNr.style == 1 ? L"Style: Natural" : L"Style: Cinematic", true); return TRUE;
+      case 516: drawOwnerButton(dis, L"Automatic skin mask", g_dlssNr.automaticSkinMask); return TRUE;
+      case 517: drawOwnerButton(dis, L"Residual stabilizer (experimental)", g_dlssNr.stabilizer); return TRUE;
       case 205: {
         HDC dc = dis->hDC; RECT r = dis->rcItem;
         HBRUSH bg = CreateSolidBrush(C_RED); FillRect(dc, &r, bg); DeleteObject(bg);
@@ -522,6 +568,15 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       InvalidateRect(h, nullptr, FALSE);
       return 0;
     }
+    if (LOWORD(w) == 510) {
+      g_dlssNr.style = (g_dlssNr.style + 1) % 3;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE); return 0;
+    }
+    if (LOWORD(w) == 516 || LOWORD(w) == 517) {
+      if (LOWORD(w) == 516) g_dlssNr.automaticSkinMask = !g_dlssNr.automaticSkinMask;
+      else g_dlssNr.stabilizer = !g_dlssNr.stabilizer;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE); return 0;
+    }
     if (LOWORD(w) >= 101 && LOWORD(w) <= 106) {
       // These are BS_OWNERDRAW controls, so Windows does not maintain a
       // checkbox state for us. Toggle our actual config state directly.
@@ -571,7 +626,22 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   if (m == WM_HSCROLL) {
     HWND ctrl = (HWND)l;
-    if (ctrl == GetDlgItem(h, 208)) {
+    if (ctrl == GetDlgItem(h, 511)) {
+      g_dlssNr.modelScale = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 512)) {
+      g_dlssNr.intensity = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 513)) {
+      g_dlssNr.structure = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 514)) {
+      g_dlssNr.skinStructure = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 515)) {
+      g_dlssNr.historyStrength = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 208)) {
       g_sharpness = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
       wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
       SetWindowTextW(GetDlgItem(h, 303), sharpText);
@@ -600,7 +670,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   c.lpfnWndProc = fpsProc;     c.lpszClassName = FPS_CLS; RegisterClassExW(&c);
   c.lpfnWndProc = settingsProc; c.lpszClassName = SET_CLS; RegisterClassExW(&c);
 
-  int barW = BAR_PAD*2 + 6*BTN_SIZE + 5*BTN_GAP;
+  int barW = BAR_PAD*2 + 7*BTN_SIZE + 6*BTN_GAP;
   g_ui = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, UI_CLS, L"",
     WS_POPUP, 0, 0, barW, BAR_PAD*2+BTN_SIZE, nullptr, nullptr, inst, nullptr);
 
@@ -615,6 +685,20 @@ bool overlayInit(HINSTANCE inst, HWND output) {
 
   if (g_settings) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 84, 80, 22, g_settings, (HMENU)101, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 244, 82, 212, 24, g_settings, (HMENU)510, inst, nullptr);
+    auto makeNrSlider = [&](int id, int y, int minimum, int maximum, int value) {
+      HWND slider = CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|TBS_NOTICKS|TBS_AUTOTICKS, 140, y, 310, 28, g_settings, (HMENU)(INT_PTR)id, inst, nullptr);
+      SendMessageW(slider, TBM_SETRANGE, TRUE, MAKELONG(minimum, maximum));
+      SendMessageW(slider, TBM_SETPOS, TRUE, value);
+      return slider;
+    };
+    makeNrSlider(511, 118, 25, 100, (int)std::lround(g_dlssNr.modelScale * 100));
+    makeNrSlider(512, 168, 0, 200, (int)std::lround(g_dlssNr.intensity * 100));
+    makeNrSlider(513, 218, 0, 200, (int)std::lround(g_dlssNr.structure * 100));
+    makeNrSlider(514, 268, -100, 200, (int)std::lround(g_dlssNr.skinStructure * 100));
+    makeNrSlider(515, 318, 0, 100, (int)std::lround(g_dlssNr.historyStrength * 100));
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 372, 200, 22, g_settings, (HMENU)516, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 402, 300, 22, g_settings, (HMENU)517, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 110, 84, 100, 22, g_settings, (HMENU)102, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 216, 84, 80, 22, g_settings, (HMENU)103, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 302, 84, 100, 22, g_settings, (HMENU)104, inst, nullptr);
@@ -705,7 +789,7 @@ void overlaySetOpen(bool open) {
     if (open) {
       ShowWindow(g_ui, SW_SHOWNOACTIVATE);
       RECT o{}; if (GetWindowRect(g_output, &o)) {
-        int barW = BAR_PAD*2 + 6*BTN_SIZE + 5*BTN_GAP;
+        int barW = BAR_PAD*2 + 7*BTN_SIZE + 6*BTN_GAP;
         int cx = o.left + (o.right - o.left - barW) / 2;
         SetWindowPos(g_ui, HWND_TOPMOST, cx, o.top+16, barW, BAR_PAD*2+BTN_SIZE, SWP_NOACTIVATE|SWP_SHOWWINDOW);
       }
@@ -757,6 +841,12 @@ bool overlayConsumeFrameLimitToggle() { bool v = g_toggleFrameLimit; g_toggleFra
 OverlayFrameLimitConfig overlayFrameLimitConfig() { return g_frameLimit; }
 float overlaySharpness() { return g_sharpness; }
 bool overlayConsumeFgToggle() { bool v = g_toggleFg; g_toggleFg = false; return v; }
+bool overlayConsumeDlssNrToggle() { bool v = g_toggleDlssNr; g_toggleDlssNr = false; return v; }
+const OverlayDlssNrConfig& overlayDlssNrConfig() { return g_dlssNr; }
+void overlaySetDlssNrEnabled(bool enabled) {
+  g_dlssNr.enabled = enabled; saveCfg();
+  if (g_ui) InvalidateRect(g_ui, nullptr, FALSE);
+}
 bool overlayFgEnabled() { return g_fgEnabled; }
 void overlaySetFgEnabled(bool enabled) {
   g_fgEnabled = enabled;
