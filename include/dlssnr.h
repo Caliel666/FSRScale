@@ -10,6 +10,7 @@ struct OverlayDlssNrConfig;
 class DlssNrRuntime {
 public:
   ~DlssNrRuntime() { shutdown(); }
+  bool available() { return ensureLoaded(); }
   bool process(Graphics& graphics, ID3D12Resource* colour,
                D3D12_RESOURCE_STATES colourState, ID3D12Resource* motion,
                D3D12_RESOURCE_STATES motionState, bool reset,
