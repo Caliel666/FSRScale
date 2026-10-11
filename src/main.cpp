@@ -529,6 +529,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         bool motionReady = false;
         bool reactiveReady = false;
         ID3D12Resource* nrStabilizedColour = nullptr;
+        ID3D12Resource* nrOutputForFrame = nullptr;
         if (spec.motionMode == TargetSpec::MotionMode::Fast) {
           motionReady = fastmv.dispatch(cmd, color.Get(), mv, reactive, cs, reset);
           reactiveReady = motionReady;
@@ -545,19 +546,37 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
           const auto& nrSettings = overlayDlssNrConfig();
           if (nrSettings.enabled) {
             const bool nrAvailable = dlssNr.available();
-            ID3D12Resource* originalColour = nrAvailable && nrSettings.stabilizer
+            // Never let the bridge write into the capture pool's reusable texture.
+            // Capture's D3D11 producer can otherwise overwrite that same resource
+            // while the previous frame's D3D12/Vulkan write-back is still in flight.
+            // Snapshot each fresh frame, run NR from that immutable snapshot, and
+            // write the result to a separate destination consumed by FSR.
+            ID3D12Resource* nrInputColour = nrAvailable
                 ? gfx.snapshotDlssNrInput(color.Get(),
                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
                 : nullptr;
+            ID3D12Resource* nrOutputColour = nrAvailable ? gfx.ensureDlssNrOutput(color.Get()) : nullptr;
+            ID3D12Resource* originalColour = nrSettings.stabilizer ? nrInputColour : nullptr;
             const auto mvState = spec.motionMode == TargetSpec::MotionMode::Fast
                 ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
                 : (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            const bool nrApplied = nrAvailable && dlssNr.process(gfx, color.Get(),
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                mv, mvState, resetThisFrame, nrSettings);
+            const bool nrApplied = nrAvailable && nrInputColour && nrOutputColour &&
+                dlssNr.process(gfx, nrInputColour, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    nrOutputColour, D3D12_RESOURCE_STATE_COMMON, mv, mvState, resetThisFrame, nrSettings);
             cmd = gfx.cmd(); // the bridge may have switched recording to the continuation list
-            if (nrApplied && nrSettings.stabilizer && originalColour)
-              nrStabilizedColour = dlssNrStabilizer.record(gfx.device(), cmd, originalColour, color.Get(), mv, mvState, resetThisFrame);
+            if (nrApplied) {
+              D3D12_RESOURCE_BARRIER nrOutBarrier{};
+              nrOutBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+              nrOutBarrier.Transition.pResource = nrOutputColour;
+              nrOutBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+              nrOutBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+              nrOutBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+              cmd->ResourceBarrier(1, &nrOutBarrier);
+              nrOutputForFrame = nrOutputColour;
+              if (nrSettings.stabilizer && originalColour)
+                nrStabilizedColour = dlssNrStabilizer.record(gfx.device(), cmd, originalColour, nrOutputColour, mv, mvState, resetThisFrame);
+            }
             if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
               lastDlssNrError = dlssNr.lastError();
               logMain(L"DLSSNR: " + lastDlssNrError);
@@ -589,7 +608,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
         // FSR dispatch (reads color/depth/mv as SRV, writes upscale as UAV).
         // No barrier needed for mv — AMDOF left it in PS|NPS.
-        ID3D12Resource* fsrInputColour = nrStabilizedColour ? nrStabilizedColour : color.Get();
+        ID3D12Resource* fsrInputColour = nrStabilizedColour ? nrStabilizedColour :
+            (nrOutputForFrame ? nrOutputForFrame : color.Get());
         usedFsr = motionReady && fsr.dispatch(cmd, fsrInputColour, depth, mv,
                                               reactiveReady ? reactive : nullptr,
                                               upscale, cs, display, dt, reset);
@@ -717,6 +737,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         tr(color.Get(),
            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
            D3D12_RESOURCE_STATE_COMMON);
+        if (nrOutputForFrame)
+          tr(nrOutputForFrame,
+             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+             D3D12_RESOURCE_STATE_COMMON);
         cmd->ResourceBarrier(n, b);
       }
 
