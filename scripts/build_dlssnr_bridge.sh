@@ -41,12 +41,16 @@ if reserve_old in s:
 elif reserve_new not in s:
     raise SystemExit("Could not patch upstream DLSSNR memory guard reserves")
 
-# The running-network guard must use the same commit headroom as the admission
-# guard. The upstream 1.5 GiB low-water mark evicts a ~793 MiB model immediately
-# after a successful build when free commit falls from ~2.9 GiB to ~1.5 GiB,
-# causing repeated 10/20/40-second step-aside/rebuild cycles. Keep 1 GiB free.
+# Keep the global system-commit low-water mark, but disable the running
+# network's VRAM-free low-water mark. On Windows/WDDM the Vulkan memory-budget
+# extension can report a small per-process budget (here 1677 MB) that becomes
+# fully consumed by the model's own persistent arenas. Treating that expected
+# steady-state usage as global VRAM exhaustion makes the runtime evict its own
+# live network every 500 ms, then rebuild it in a 10/20/40-second loop. The
+# admission check still uses the VRAM budget plus reserve before building; the
+# running guard continues to yield under real system-commit pressure.
 low_old = "constexpr uint64_t kVramLow = 384ull << 20, kCommitLow = 1536ull << 20;"
-low_new = "constexpr uint64_t kVramLow = 384ull << 20, kCommitLow = 1024ull << 20;"
+low_new = "constexpr uint64_t kVramLow = 0ull, kCommitLow = 1024ull << 20;"
 if low_old in s:
     s = s.replace(low_old, low_new, 1)
 elif low_new not in s:
