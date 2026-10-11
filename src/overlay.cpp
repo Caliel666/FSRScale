@@ -579,6 +579,8 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     EndPaint(h, &ps); return 0;
   }
   if (m == WM_NCHITTEST) {
+    // FPS is a visual-only HUD: never let it consume mouse hit-tests.
+    if (h == g_fps) return HTTRANSPARENT;
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     ScreenToClient(h, &p);
     if (p.y < 48 && !((p.x >= 244 && p.x < 336) || (p.x >= 344 && p.x < 456))) return HTCAPTION;
@@ -718,7 +720,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     WS_POPUP, 0, 0, barW, BAR_PAD*2+BTN_SIZE, nullptr, nullptr, inst, nullptr);
 
   // FPS window — layered for per-pixel alpha via UpdateLayeredWindow
-  g_fps = CreateWindowExW(WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST,
+  g_fps = CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST,
     FPS_CLS, L"", WS_POPUP, 0, 0, 200, 100, nullptr, nullptr, inst, nullptr);
 
   // Settings panel
