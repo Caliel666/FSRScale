@@ -26,7 +26,7 @@ typedef struct NRLiveDlssNrSettings {
   float skin_structure;      // -1..2
   float history_strength;    // 0..1
   int automatic_skin_mask;
-  int passes;                // 1..4 neural refinement passes
+  int passes;                // 1..3 neural refinement passes
 } NRLiveDlssNrSettings;
 
 typedef void (*NRLiveDlssNrFlushCallback)(void* user_data);
