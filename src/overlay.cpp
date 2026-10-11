@@ -471,7 +471,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_MOUSEMOVE: {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     int old = g_hoverBtn; g_hoverBtn = -1;
-    for (int i = 0; i < 6; ++i) { RECT b = btnRect(i); if (PtInRect(&b, p)) { g_hoverBtn = i; break; } }
+    for (int i = 0; i < 7; ++i) { RECT b = btnRect(i); if (PtInRect(&b, p)) { g_hoverBtn = i; break; } }
     if (g_hoverBtn != old) {
       InvalidateRect(h, nullptr, FALSE);
       TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, h, 0 };
