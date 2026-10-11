@@ -196,7 +196,12 @@ jobs:
             "NRLive.exe",
             "amd_fidelityfx_loader_dx12.dll",
             "amd_fidelityfx_framegeneration_dx12.dll",
-            "amd_fidelityfx_upscaler_dx12.dll"
+            "amd_fidelityfx_upscaler_dx12.dll",
+            "NRLiveDlssNrBridge.dll",
+            "dlssnr_extract_model.exe",
+            "DLSSNR-AMD-LICENSE.txt",
+            "DLSSNR-AMD-UPSTREAM-README.txt",
+            "DLSSNR-AMD-SETUP.txt"
           )) {
             if (-not (Test-Path (Join-Path $package $file))) { throw "Portable package is missing $file" }
           }
