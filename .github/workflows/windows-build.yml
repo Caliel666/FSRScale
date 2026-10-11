@@ -35,6 +35,8 @@ jobs:
           unzip -q "$RUNNER_TEMP/dlssnr-runtime.zip" -d "$RUNNER_TEMP/dlssnr-release"
           src="$(find "$RUNNER_TEMP/dlssnr-source" -type f -path '*/windows/src/core/nr_runtime.cpp' -printf '%h\n' | sed 's#/windows/src/core##' | head -n 1)"
           test -n "$src"
+          mkdir -p "$src/toolchain"
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$src/toolchain/Vulkan-Headers"
           DLSSNR_SOURCE="$src" bash scripts/build_dlssnr_bridge.sh build/dlssnr-runtime
           runtime_dir="$(find "$RUNNER_TEMP/dlssnr-release" -type d -name dlssnr-amd -print -quit)"
           tools_dir="$(find "$RUNNER_TEMP/dlssnr-release" -type d -name model-tools -print -quit)"
