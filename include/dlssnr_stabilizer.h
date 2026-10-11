@@ -27,4 +27,5 @@ private:
   std::vector<ComPtr<ID3D12Resource>> m_retired;
   UINT m_width=0, m_height=0, m_format=DXGI_FORMAT_UNKNOWN, m_set=0, m_current=0;
   bool m_hasHistory=false;
+  D3D12_RESOURCE_STATES m_outputState=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 };
