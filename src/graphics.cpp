@@ -433,6 +433,34 @@ ID3D12Resource* Graphics::snapshotDlssNrInput(ID3D12Resource* colour, D3D12_RESO
   return m_dlssNrInput.Get();
 }
 
+ID3D12Resource* Graphics::ensureDlssNrOutput(ID3D12Resource* colour)
+{
+  if (!colour || !m_dev) return nullptr;
+  const auto desc = colour->GetDesc();
+  if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+      desc.Width == 0 || desc.Height == 0 || desc.SampleDesc.Count != 1)
+    return nullptr;
+  if (m_dlssNrOutput) {
+    const auto current = m_dlssNrOutput->GetDesc();
+    if (current.Width == desc.Width && current.Height == desc.Height &&
+        current.Format == desc.Format)
+      return m_dlssNrOutput.Get();
+    m_retiredDlssNrOutputs.push_back(std::move(m_dlssNrOutput));
+  }
+  auto outputDesc = desc;
+  outputDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+  outputDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+  D3D12_HEAP_PROPERTIES hp{};
+  hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+  hp.CreationNodeMask = 1;
+  hp.VisibleNodeMask = 1;
+  if (FAILED(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE,
+      &outputDesc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+      IID_PPV_ARGS(&m_dlssNrOutput))))
+    return nullptr;
+  return m_dlssNrOutput.Get();
+}
+
 void Graphics::end() { cmd()->Close(); }
 
 bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t frameIndex)
