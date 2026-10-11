@@ -1,0 +1,8 @@
+DLSSNR-AMD Windows runtime
+Source: https://github.com/mochizuki0323/DLSSNR-AMD
+License: MIT
+Upstream version intended for this integration: v0.0.4-win-preview
+
+The complete MIT license is in the upstream repository's LICENSE file. The build workflow copies that exact license into the portable package as DLSSNR-AMD-LICENSE.txt.
+
+Important: the upstream project does not distribute NVIDIA DLSS-NR model weights. Do not bundle nvngx_dlssnr.dll or dlssnr.bin. A user must supply a compatible nvngx_dlssnr.dll and use the upstream model extraction tool to create dlssnr-amd/dlssnr.bin.
