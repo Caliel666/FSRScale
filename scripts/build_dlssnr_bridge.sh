@@ -40,6 +40,17 @@ if reserve_old in s:
     s = s.replace(reserve_old, reserve_new, 1)
 elif reserve_new not in s:
     raise SystemExit("Could not patch upstream DLSSNR memory guard reserves")
+
+# The running-network guard must use the same commit headroom as the admission
+# guard. The upstream 1.5 GiB low-water mark evicts a ~793 MiB model immediately
+# after a successful build when free commit falls from ~2.9 GiB to ~1.5 GiB,
+# causing repeated 10/20/40-second step-aside/rebuild cycles. Keep 1 GiB free.
+low_old = "constexpr uint64_t kVramLow = 384ull << 20, kCommitLow = 1536ull << 20;"
+low_new = "constexpr uint64_t kVramLow = 384ull << 20, kCommitLow = 1024ull << 20;"
+if low_old in s:
+    s = s.replace(low_old, low_new, 1)
+elif low_new not in s:
+    raise SystemExit("Could not patch DLSSNR running-network commit threshold")
 old = """    in.target = f.target; in.target_state = f.target_state;
     in.motion = f.motion; in.motion_state = f.motion_state;"""
 new = """    in.target = f.target; in.target_state = f.target_state;
