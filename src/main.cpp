@@ -579,7 +579,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
                 nrStabilizedColour = dlssNrStabilizer.record(
                     gfx.device(), cmd, originalColour, nrOutputColour, mv, mvState,
                     resetThisFrame, nrSettings.stabilizer ? 0.45f : 0.0f,
-                    nrSettings.colorStrength);
+                    nrSettings.colorStrength, nrSettings.maxRatio);
             }
             if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
               lastDlssNrError = dlssNr.lastError();
