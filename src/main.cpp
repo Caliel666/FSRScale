@@ -320,6 +320,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (!running) break;
 
       pollOverlayToggle(spec);
+      if (overlayConsumeDlssNrToggle()) reset = true;
       if (fsrOk) fsr.setSharpening(true, overlaySharpness());
       const bool overlayOpenNow = isOverlayOpen();
       // Closing the overlay is an intentional handoff back to the game.
