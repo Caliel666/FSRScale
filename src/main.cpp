@@ -233,6 +233,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     DlssNrRuntime dlssNr;
     DlssNrStabilizer dlssNrStabilizer;
     std::wstring lastDlssNrError;
+    bool lastDlssNrStabilizerEnabled = false;
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
     logMain(fsrOk ? L"FSR upscaler init OK: " + fsr.lastError() : L"FSR upscaler init FAILED: " + fsr.lastError());
@@ -321,6 +322,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
       pollOverlayToggle(spec);
       if (overlayConsumeDlssNrToggle()) reset = true;
+      const bool stabilizerEnabledNow = overlayDlssNrConfig().stabilizer;
+      if (stabilizerEnabledNow != lastDlssNrStabilizerEnabled) {
+        reset = true;
+        lastDlssNrStabilizerEnabled = stabilizerEnabledNow;
+      }
       if (fsrOk) fsr.setSharpening(true, overlaySharpness());
       const bool overlayOpenNow = isOverlayOpen();
       // Closing the overlay is an intentional handoff back to the game.
