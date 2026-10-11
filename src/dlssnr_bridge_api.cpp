@@ -83,7 +83,10 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
         frame.motion_state = static_cast<D3D12_RESOURCE_STATES>(motion_state);
         frame.depth = nullptr; // NRLive does not currently capture real game depth.
         frame.reset = reset_history != 0;
-        return host->session->run_d3d12_queue(frame, makeControls(*settings)) ? 1 : 0;
+        const bool ok = host->session->run_d3d12_queue(frame, makeControls(*settings));
+        if (!ok) host->error = "DLSSNR did not run this frame; inspect dlssnr-amd.log for the runtime reason.";
+        else host->error.clear();
+        return ok ? 1 : 0;
     } catch (const std::exception& e) {
         host->error = e.what();
         return 0;
