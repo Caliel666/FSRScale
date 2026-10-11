@@ -18,11 +18,14 @@ public:
   bool rebuildSwapChain(Size display);
   bool adoptSwapChain(IDXGISwapChain4* wrapped);
   bool begin();
+  // Submit the current prep command list and open a second list for the same frame.
+  // Used to place the cross-API DLSSNR pass between motion generation and FSR without a CPU wait.
+  bool submitForInterop();
   void end();
   ID3D12Device* device() const { return m_dev.Get(); }
   IDXGISwapChain4* swapChain() const { return m_swap.Get(); }
   ID3D12CommandQueue* queue() const { return m_queue.Get(); }
-  ID3D12GraphicsCommandList* cmd() const { return m_cmd.Get(); }
+  ID3D12GraphicsCommandList* cmd() const { return (m_interopContinuation ? m_cmdContinuation : m_cmd).Get(); }
   ID3D12Resource* backbuffer() const { return m_back[m_index].Get(); }
   ID3D12Resource* upscaleOutput() const { return m_upscaleOutput.Get(); }
   ID3D12Resource* dummyDepth() const { return m_dummyDepth.Get(); }
@@ -68,7 +71,10 @@ private:
   ComPtr<ID3D12DescriptorHeap> m_rtv;
   ComPtr<ID3D12DescriptorHeap> m_srvHeap;
   ComPtr<ID3D12CommandAllocator> m_alloc[3];
+  ComPtr<ID3D12CommandAllocator> m_allocContinuation[3];
   ComPtr<ID3D12GraphicsCommandList> m_cmd;
+  ComPtr<ID3D12GraphicsCommandList> m_cmdContinuation;
+  bool m_interopContinuation = false;
   ComPtr<ID3D12Fence> m_fence;
   HANDLE m_fenceEvent = nullptr;
   uint64_t m_fenceValue = 0;
