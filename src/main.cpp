@@ -578,8 +578,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
               if (originalColour)
                 nrStabilizedColour = dlssNrStabilizer.record(
                     gfx.device(), cmd, originalColour, nrOutputColour, mv, mvState,
-                    resetThisFrame, nrSettings.stabilizer ? 0.45f : 0.0f,
-                    nrSettings.colorStrength, nrSettings.maxRatio);
+                    resetThisFrame,
+                    std::max(nrSettings.historyStrength, nrSettings.stabilizer ? 0.45f : 0.0f),
+                    nrSettings.intensity, nrSettings.colorStrength, nrSettings.maxRatio);
             }
             if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
               lastDlssNrError = dlssNr.lastError();
