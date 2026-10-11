@@ -628,13 +628,19 @@ static bool writeScreenshotPng(const std::wstring& folder,
 
 bool Graphics::present()
 {
+  // submitForInterop() may have already submitted m_cmd and continued the
+  // frame on m_cmdContinuation. Present must execute the currently active
+  // list, not replay the already-submitted original list.
   ID3D12CommandList* lists[] = { cmd() };
   m_queue->ExecuteCommandLists(1, lists);
   // Sync interval 0 = no vsync wait on CPU.
   m_swap->Present(0, 0);
 
-  // Frame buffering: only wait on a fence from maxFrames-1 ago so the CPU
-  // never drains the GPU every frame (was the main stutter source).
+  // Signal this submission, but don't globally wait for the preceding
+  // frame here. With the two-buffer FSR interpolation swapchain, waiting on
+  // v-1 serializes every base frame behind FG's GPU work and can halve the
+  // input rate. The per-backbuffer fence below still protects allocator and
+  // backbuffer reuse; screenshot requests retain their explicit completion wait.
   const uint64_t v = ++m_fenceValue;
   m_queue->Signal(m_fence.Get(), v);
   m_frameFence[m_index] = v;
@@ -665,15 +671,6 @@ bool Graphics::present()
     m_screenshotPending = false;
     m_screenshotFolder.clear();
     m_screenshotFrame = 0;
-  }
-
-  const UINT bufCount = 2; // match swap chain BufferCount
-  if (m_fenceValue >= bufCount) {
-    const uint64_t waitFor = m_fenceValue - (bufCount - 1);
-    if (m_fence->GetCompletedValue() < waitFor) {
-      m_fence->SetEventOnCompletion(waitFor, m_fenceEvent);
-      WaitForSingleObject(m_fenceEvent, 1000);
-    }
   }
 
   m_index = m_swap->GetCurrentBackBufferIndex();
