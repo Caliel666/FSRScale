@@ -558,8 +558,22 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   if (m == WM_NCHITTEST) {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     ScreenToClient(h, &p);
-    if (p.y < 48) return HTCAPTION;
+    if (p.y < 48 && !((p.x >= 244 && p.x < 336) || (p.x >= 344 && p.x < 456))) return HTCAPTION;
     return HTCLIENT;
+  }
+  if (m == WM_LBUTTONUP) {
+    POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+    if (p.y < 48 && p.x >= 244 && p.x < 336) {
+      g_dlssNrTab = false;
+      for (int id = 510; id <= 517; ++id) if (GetDlgItem(h, id)) ShowWindow(GetDlgItem(h, id), SW_HIDE);
+      InvalidateRect(h, nullptr, TRUE); return 0;
+    }
+    if (p.y < 48 && p.x >= 344 && p.x < 456) {
+      g_dlssNrTab = true;
+      for (int id = 510; id <= 517; ++id) if (GetDlgItem(h, id)) ShowWindow(GetDlgItem(h, id), SW_SHOW);
+      InvalidateRect(h, nullptr, TRUE); return 0;
+    }
+    return 0;
   }
   if (m == WM_COMMAND) {
     if (LOWORD(w) == 205 && HIWORD(w) == BN_CLICKED) {
