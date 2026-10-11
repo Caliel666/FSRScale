@@ -13,7 +13,7 @@ public:
   ID3D12Resource* record(ID3D12Device* device, ID3D12GraphicsCommandList* cmd,
               ID3D12Resource* original, ID3D12Resource* result,
               ID3D12Resource* motion, D3D12_RESOURCE_STATES motionState,
-              bool resetHistory, float stabilizerStrength, float colorStrength);
+              bool resetHistory, float stabilizerStrength, float colorStrength, float maxRatio);
 private:
   bool build(ID3D12Device* device);
   bool ensureResources(ID3D12Resource* result);
