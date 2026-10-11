@@ -557,7 +557,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
                 : nullptr;
             ID3D12Resource* nrOutputColour = nrAvailable ? gfx.ensureDlssNrOutput(color.Get()) : nullptr;
-            ID3D12Resource* originalColour = nrSettings.stabilizer ? nrInputColour : nullptr;
+            ID3D12Resource* originalColour = nrInputColour;
             const auto mvState = spec.motionMode == TargetSpec::MotionMode::Fast
                 ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
                 : (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -575,8 +575,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
                                                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
               cmd->ResourceBarrier(1, &nrOutBarrier);
               nrOutputForFrame = nrOutputColour;
-              if (nrSettings.stabilizer && originalColour)
-                nrStabilizedColour = dlssNrStabilizer.record(gfx.device(), cmd, originalColour, nrOutputColour, mv, mvState, resetThisFrame);
+              if (originalColour)
+                nrStabilizedColour = dlssNrStabilizer.record(
+                    gfx.device(), cmd, originalColour, nrOutputColour, mv, mvState,
+                    resetThisFrame, nrSettings.stabilizer ? 0.45f : 0.0f,
+                    nrSettings.colorStrength);
             }
             if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
               lastDlssNrError = dlssNr.lastError();
