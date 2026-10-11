@@ -94,7 +94,8 @@ ID3D12Resource* DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsComm
   if(!device||!cmd||!original||!result||!motion||!build(device)||!ensureResources(result))return nullptr;
   auto desc=motion->GetDesc(); if(desc.Width==0||desc.Height==0)return nullptr;
   UINT stride=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-  auto cpu=m_heap->GetCPUDescriptorHandleForHeapStart(),gpu=m_heap->GetGPUDescriptorHandleForHeapStart();
+  auto cpu=m_heap->GetCPUDescriptorHandleForHeapStart();
+  auto gpu=m_heap->GetGPUDescriptorHandleForHeapStart();
   cpu.ptr+=SIZE_T(m_set)*kViews*stride; gpu.ptr+=UINT64(m_set)*kViews*stride;
   auto srv=[&](ID3D12Resource* r,DXGI_FORMAT fmt){D3D12_SHADER_RESOURCE_VIEW_DESC v{};v.Format=fmt;v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;v.Texture2D.MipLevels=1;device->CreateShaderResourceView(r,&v,cpu);cpu.ptr+=stride;};
   auto uav=[&](ID3D12Resource* r,DXGI_FORMAT fmt){D3D12_UNORDERED_ACCESS_VIEW_DESC v{};v.Format=fmt;v.ViewDimension=D3D12_UAV_DIMENSION_TEXTURE2D;device->CreateUnorderedAccessView(r,nullptr,&v,cpu);cpu.ptr+=stride;};
