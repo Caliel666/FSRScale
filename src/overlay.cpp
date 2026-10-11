@@ -576,7 +576,7 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     if (p.y < 48 && p.x >= 344 && p.x < 456) {
       g_dlssNrTab = true;
-      for (int id = 510; id <= 517; ++id) if (GetDlgItem(h, id)) ShowWindow(GetDlgItem(h, id), SW_SHOW);
+      for (int id = 510; id <= 519; ++id) if (GetDlgItem(h, id)) ShowWindow(GetDlgItem(h, id), SW_SHOW);
       InvalidateRect(h, nullptr, TRUE); return 0;
     }
     return 0;
@@ -660,6 +660,12 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       saveCfg(); InvalidateRect(h, nullptr, FALSE);
     } else if (ctrl == GetDlgItem(h, 515)) {
       g_dlssNr.historyStrength = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 518)) {
+      g_dlssNr.localTone = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE);
+    } else if (ctrl == GetDlgItem(h, 519)) {
+      g_dlssNr.maxRatio = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
       saveCfg(); InvalidateRect(h, nullptr, FALSE);
     } else if (ctrl == GetDlgItem(h, 208)) {
       g_sharpness = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
