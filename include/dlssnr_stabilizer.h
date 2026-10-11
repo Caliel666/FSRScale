@@ -10,7 +10,7 @@ using Microsoft::WRL::ComPtr;
 // uses motion reprojection and residual clamping without surface-key rejection.
 class DlssNrStabilizer {
 public:
-  bool record(ID3D12Device* device, ID3D12GraphicsCommandList* cmd,
+  ID3D12Resource* record(ID3D12Device* device, ID3D12GraphicsCommandList* cmd,
               ID3D12Resource* original, ID3D12Resource* result,
               ID3D12Resource* motion, D3D12_RESOURCE_STATES motionState,
               bool resetHistory);
