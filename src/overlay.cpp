@@ -549,7 +549,7 @@ static void invalidateNrValue(HWND h, int controlId) {
     case 521: y = 472; break;
     default: return;
   }
-  RECT valueArea{20, y - 2, 136, y + 22};
+  RECT valueArea{20, y - 2, 456, y + 22};
   InvalidateRect(h, &valueArea, FALSE);
 }
 
