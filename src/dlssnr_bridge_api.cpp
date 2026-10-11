@@ -61,11 +61,13 @@ extern "C" __declspec(dllexport) void NRLiveDlssNrDestroy(void* opaque) {
 
 extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
     void* opaque, ID3D12Device* device, ID3D12CommandQueue* queue,
-    ID3D12Resource* colour, uint32_t colour_state, ID3D12Resource* motion,
+    ID3D12Resource* input_colour, uint32_t input_colour_state,
+    ID3D12Resource* output_colour, uint32_t output_colour_state,
+    ID3D12Resource* motion,
     uint32_t motion_state, int reset_history, const NRLiveDlssNrSettings* settings,
     NRLiveDlssNrFlushCallback flush, void* flush_user_data) {
     auto* host = static_cast<HostSession*>(opaque);
-    if (!host || !host->session || !device || !queue || !colour || !settings ||
+    if (!host || !host->session || !device || !queue || !input_colour || !output_colour || !settings ||
         !settings->enabled || !flush)
         return 0;
 
@@ -79,8 +81,10 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
         frame.device = device;
         frame.queue = queue;
         frame.flush = [flush, flush_user_data] { flush(flush_user_data); };
-        frame.target = colour;
-        frame.target_state = static_cast<D3D12_RESOURCE_STATES>(colour_state);
+        frame.target = output_colour;
+        frame.target_state = static_cast<D3D12_RESOURCE_STATES>(output_colour_state);
+        frame.source = input_colour;
+        frame.source_state = static_cast<D3D12_RESOURCE_STATES>(input_colour_state);
         frame.motion = motion;
         frame.motion_state = static_cast<D3D12_RESOURCE_STATES>(motion_state);
         // The upstream runtime expects motion vectors in normalized texture
@@ -88,7 +92,7 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
         // sx=1/colour width, sy=1/colour height. Leaving the D3D12QueueFrame
         // defaults at 1.0 turns ordinary pixel motion into enormous UV offsets,
         // effectively invalidating temporal reprojection on almost every frame.
-        const D3D12_RESOURCE_DESC colourDesc = colour->GetDesc();
+        const D3D12_RESOURCE_DESC colourDesc = input_colour->GetDesc();
         if (colourDesc.Width > 0 && colourDesc.Height > 0) {
             frame.motion_scale_x = 1.0f / static_cast<float>(colourDesc.Width);
             frame.motion_scale_y = 1.0f / static_cast<float>(colourDesc.Height);
