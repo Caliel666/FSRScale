@@ -70,6 +70,8 @@ bool DlssNrRuntime::process(Graphics& graphics, ID3D12Resource* colour,
   s.style = std::clamp(settings.style, 0, 2);
   s.model_scale = std::clamp(settings.modelScale, 0.25f, 1.0f);
   s.intensity = std::clamp(settings.intensity, 0.0f, 2.0f);
+  s.local_tone = std::clamp(settings.localTone, 0.0f, 2.0f);
+  s.max_ratio = std::clamp(settings.maxRatio, 1.0f, 8.0f);
   s.structure = std::clamp(settings.structure, 0.0f, 2.0f);
   s.skin_structure = std::clamp(settings.skinStructure, -1.0f, 2.0f);
   s.history_strength = std::clamp(settings.historyStrength, 0.0f, 1.0f);
