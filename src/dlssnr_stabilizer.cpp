@@ -31,7 +31,7 @@ float luminance(float3 c){return dot(c,float3(.2126,.7152,.0722));}
  // Colour strength 0 preserves the game's original hue while applying the
  // network's luminance correction; 1 retains the full network RGB result.
  float3 ea=E(adjusted);
- float ratio=clamp(luminance(ea)/max(luminance(eb),1e-4),0,maxRatio);
+ float ratio=clamp(luminance(ea)/max(luminance(eb),1e-4),1.0/maxRatio,maxRatio);
  float3 huePreserving=Einv(eb*ratio);
  float3 composed=lerp(huePreserving,adjusted,saturate(colourStrength));
  output[id.xy]=float4(composed,o.a);
