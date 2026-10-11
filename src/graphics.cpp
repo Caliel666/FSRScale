@@ -566,7 +566,7 @@ static bool writeScreenshotPng(const std::wstring& folder,
 
 bool Graphics::present()
 {
-  ID3D12CommandList* lists[] = { m_cmd.Get() };
+  ID3D12CommandList* lists[] = { cmd() };
   m_queue->ExecuteCommandLists(1, lists);
   // Sync interval 0 = no vsync wait on CPU.
   m_swap->Present(0, 0);
@@ -621,6 +621,7 @@ bool Graphics::present()
     m_fence->SetEventOnCompletion(bbFence, m_fenceEvent);
     WaitForSingleObject(m_fenceEvent, 1000);
   }
+  m_interopContinuation = false;
   return true;
 }
 
@@ -632,17 +633,11 @@ bool Graphics::waitForGpu()
   if (!m_queue || !m_fence) return false;
 
   // If the command list is open, close + execute it so the GPU sees it.
-  if (m_cmd) {
+  if (cmd()) {
     HRESULT hrClose = cmd()->Close();
     if (SUCCEEDED(hrClose)) {
-      ID3D12CommandList* lists[] = { m_cmd.Get() };
+      ID3D12CommandList* lists[] = { cmd() };
       m_queue->ExecuteCommandLists(1, lists);
-    }
-    // Reset the allocator + list so the next begin() reuses cleanly.
-    if (m_alloc[m_index]) {
-      m_alloc[m_index]->Reset();
-      cmd()->Reset(m_alloc[m_index].Get(), nullptr);
-      cmd()->Close();
     }
   }
 
