@@ -30,7 +30,7 @@ compile config windows/src/pe/nr_pe_config.cpp
 compile host_api "$repo/src/dlssnr_bridge_api.cpp"
 compile vkdevice_stub "$repo/src/dlssnr_vkdevice_stub.cpp"
 objs=("$out"/obj/*.o)
-ldflags=(-ld3d12 -ldxgi -ldwmapi -lgdi32 -lole32 -ldbghelp -ld3dcompiler -static -static-libgcc -static-libstdc++)
+ldflags=(-ld3d12 -ldxgi -ldwmapi -lgdi32 -lole32 -ldbghelp -ld3dcompiler -pthread -static -static-libgcc -static-libstdc++)
 undefined=$({ "$cxx" -shared -o /dev/null "${objs[@]}" "${ldflags[@]}" 2>&1 || true; } |
   grep -o "undefined reference to `vk[A-Za-z0-9_]*'" | sed "s/.*`//; s/'//" | sort -u || true)
 {
@@ -55,3 +55,4 @@ undefined=$({ "$cxx" -shared -o /dev/null "${objs[@]}" "${ldflags[@]}" 2>&1 || t
 x86_64-w64-mingw32-gcc -O2 -c "$out/vulkan_lazy.c" -o "$out/obj/vulkan_lazy_c.o"
 "$cxx" -shared -o "$out/NRLiveDlssNrBridge.dll" "${objs[@]}" "$out/obj/vulkan_lazy_s.o" "$out/obj/vulkan_lazy_c.o" "${ldflags[@]}"
 test -s "$out/NRLiveDlssNrBridge.dll"
+rm -rf "$out/obj" "$out/generated" "$out/vulkan_lazy.s" "$out/vulkan_lazy.c"
