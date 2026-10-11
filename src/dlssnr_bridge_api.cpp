@@ -84,6 +84,7 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
             host->requestedScale = requestedScale;
             host->activeScale = requestedScale;
             host->fallbackTried = false;
+            host->error.clear();
         }
         host->session->set_model_scale(host->activeScale);
         host->session->set_history_strength(std::clamp(settings->history_strength, 0.0f, 1.0f));
