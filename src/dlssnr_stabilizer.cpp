@@ -20,7 +20,7 @@ float3 Einv(float3 y){y=clamp(y,0,.999);return min(y/max(1-y,1e-5),1);}
  float3 r=E(o.rgb)-E(base), stable=r;
  if(validHistory!=0){
    float2 v=motion.Load(int3(min(id.xy,uint2(mvW-1,mvH-1)),0));
-   int2 p=int2(round(float2(id.xy)-v));
+   int2 p=int2(round(float2(id.xy)+v));
    if(p.x>=0&&p.y>=0&&p.x<int(w)&&p.y<int(h)){
      float4 old=history.Load(int3(p,0));
      if(old.a>.5) stable=r+alpha*(clamp(old.rgb,r-delta,r+delta)-r);
