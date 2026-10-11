@@ -161,9 +161,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
   HWND out = createOutput(inst, 1280, 720);
   if (!out) return 1;
-  // DXGI Desktop Duplication must not recursively capture NRLive's own
-  // fullscreen presentation window.
-  SetWindowDisplayAffinity(out, WDA_EXCLUDEFROMCAPTURE);
+  // Keep the presentation surface capturable by OBS and other desktop capture
+  // tools. The DXGI capture implementation excludes NRLive by HWND/source
+  // selection; WDA_EXCLUDEFROMCAPTURE also hides this output from OBS.
+  SetWindowDisplayAffinity(out, WDA_NONE);
 
   constexpr int kStopId = 0x4653;
   bool hk = RegisterHotKey(nullptr, kStopId,
