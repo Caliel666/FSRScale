@@ -499,6 +499,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       bool usedFsr = false;
       const bool resetThisFrame = reset;
 
+      ID3D12Resource* nrOutputForFrame = nullptr;
       if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
         //   color:   COMMON  -> PS|NPS   (FSR & AMDOF read as SRV)
@@ -529,7 +530,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         bool motionReady = false;
         bool reactiveReady = false;
         ID3D12Resource* nrStabilizedColour = nullptr;
-        ID3D12Resource* nrOutputForFrame = nullptr;
         if (spec.motionMode == TargetSpec::MotionMode::Fast) {
           motionReady = fastmv.dispatch(cmd, color.Get(), mv, reactive, cs, reset);
           reactiveReady = motionReady;
@@ -723,7 +723,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       //   color: PS|NPS -> COMMON  (return for next D3D11 copy; always,
       //                              whether or not FSR was used)
       {
-        D3D12_RESOURCE_BARRIER b[2]{};
+        D3D12_RESOURCE_BARRIER b[3]{};
         int n = 0;
         auto tr = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES a, D3D12_RESOURCE_STATES s) {
           b[n].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
