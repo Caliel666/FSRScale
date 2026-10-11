@@ -85,6 +85,7 @@ static void loadCfg() {
   g_dlssNr.modelScale = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"scale", 100, ini.c_str()), 25, 100) / 100.0f;
   g_dlssNr.style = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"style", 0, ini.c_str()), 0, 2);
   g_dlssNr.intensity = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"intensity", 100, ini.c_str()), 0, 200) / 100.0f;
+  g_dlssNr.colorStrength = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"color_strength", 100, ini.c_str()), 0, 100) / 100.0f;
   g_dlssNr.localTone = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"local_tone", 100, ini.c_str()), 0, 200) / 100.0f;
   g_dlssNr.maxRatio = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"max_ratio", 200, ini.c_str()), 100, 800) / 100.0f;
   g_dlssNr.structure = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"structure", 100, ini.c_str()), 0, 200) / 100.0f;
@@ -134,6 +135,7 @@ static void saveCfg() {
   swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.modelScale * 100)); WritePrivateProfileStringW(L"DLSSNR", L"scale", nrValue, ini.c_str());
   swprintf_s(nrValue, L"%d", g_dlssNr.style); WritePrivateProfileStringW(L"DLSSNR", L"style", nrValue, ini.c_str());
   swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.intensity * 100)); WritePrivateProfileStringW(L"DLSSNR", L"intensity", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.colorStrength * 100)); WritePrivateProfileStringW(L"DLSSNR", L"color_strength", nrValue, ini.c_str());
   swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.localTone * 100)); WritePrivateProfileStringW(L"DLSSNR", L"local_tone", nrValue, ini.c_str());
   swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.maxRatio * 100)); WritePrivateProfileStringW(L"DLSSNR", L"max_ratio", nrValue, ini.c_str());
   swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.structure * 100)); WritePrivateProfileStringW(L"DLSSNR", L"structure", nrValue, ini.c_str());
@@ -419,13 +421,15 @@ static void paintSettings(HWND h, HDC dc) {
     drawText(dc, value, 24, 86, 13, C_TEXT, false);
     swprintf_s(value, L"Model scale: %.2f", g_dlssNr.modelScale); drawText(dc, value, 24, 122, 13, C_TEXT, false);
     swprintf_s(value, L"Intensity: %.2f", g_dlssNr.intensity); drawText(dc, value, 24, 172, 13, C_TEXT, false);
+    swprintf_s(value, L"Colour strength: %.2f", g_dlssNr.colorStrength); drawText(dc, value, 24, 472, 13, C_TEXT, false);
     swprintf_s(value, L"Structure: %.2f", g_dlssNr.structure); drawText(dc, value, 24, 222, 13, C_TEXT, false);
     swprintf_s(value, L"Skin structure: %.2f", g_dlssNr.skinStructure); drawText(dc, value, 24, 272, 13, C_TEXT, false);
     swprintf_s(value, L"Temporal history: %.2f", g_dlssNr.historyStrength); drawText(dc, value, 24, 322, 13, C_TEXT, false);
     swprintf_s(value, L"Local tone: %.2f", g_dlssNr.localTone); drawText(dc, value, 24, 372, 13, C_TEXT, false);
     swprintf_s(value, L"Highlight guard (max ratio): %.2f", g_dlssNr.maxRatio); drawText(dc, value, 24, 422, 13, C_TEXT, false);
-    drawText(dc, L"Model weights are not included; see the DLSSNR setup instructions.", 24, 548, 10, C_DIM, false);
-    drawText(dc, g_saveStatus.c_str(), 24, 574, 10, C_MUTED, false);
+    drawText(dc, L"Colour 0 preserves the game's hue; 1 uses full neural-rendered colour.", 24, 612, 10, C_DIM, false);
+    drawText(dc, L"Model weights are not included; see the DLSSNR setup instructions.", 24, 626, 10, C_DIM, false);
+    drawText(dc, g_saveStatus.c_str(), 24, 646, 10, C_MUTED, false);
     return;
   }
   section(L"FPS OVERLAY",58);
@@ -467,7 +471,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
           else { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
             wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
             SendMessageW(GetDlgItem(g_settings, 207), CB_SETCURSEL, g_frameLimit.method, 0);
-            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-620)/2, 480, 620, SWP_NOACTIVATE|SWP_SHOWWINDOW);
+            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-680)/2, 480, 680, SWP_NOACTIVATE|SWP_SHOWWINDOW);
             InvalidateRect(g_settings, nullptr, TRUE); } }
         InvalidateRect(h, nullptr, FALSE); UpdateWindow(h); return 0;
       }
@@ -520,7 +524,7 @@ static void setSettingsTab(HWND h, bool dlssNr) {
   for (int id : generalIds)
     if (HWND control = GetDlgItem(h, id))
       ShowWindow(control, dlssNr ? SW_HIDE : SW_SHOW);
-  for (int id = 510; id <= 520; ++id)
+  for (int id = 510; id <= 521; ++id)
     if (HWND control = GetDlgItem(h, id))
       ShowWindow(control, dlssNr ? SW_SHOW : SW_HIDE);
 }
@@ -542,6 +546,7 @@ static void invalidateNrValue(HWND h, int controlId) {
     case 515: y = 322; break;
     case 518: y = 372; break;
     case 519: y = 422; break;
+    case 521: y = 472; break;
     default: return;
   }
   RECT valueArea{20, y - 2, 136, y + 22};
@@ -695,7 +700,11 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   if (m == WM_HSCROLL) {
     HWND ctrl = (HWND)l;
-    if (ctrl == GetDlgItem(h, 511)) {
+    if (ctrl == GetDlgItem(h, 521)) {
+      g_dlssNr.colorStrength = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 521);
+    } else if (ctrl == GetDlgItem(h, 511)) {
       g_dlssNr.modelScale = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
       // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
       if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
@@ -770,7 +779,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   // Settings panel
   { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
     g_settings = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, SET_CLS, L"",
-      WS_POPUP, (sw-480)/2, (sh-620)/2, 480, 620, nullptr, nullptr, inst, nullptr); }
+      WS_POPUP, (sw-480)/2, (sh-680)/2, 480, 680, nullptr, nullptr, inst, nullptr); }
 
   if (g_settings) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 84, 80, 22, g_settings, (HMENU)101, inst, nullptr);
@@ -788,8 +797,9 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     makeNrSlider(515, 318, 0, 100, (int)std::lround(g_dlssNr.historyStrength * 100));
     makeNrSlider(518, 368, 0, 200, (int)std::lround(g_dlssNr.localTone * 100));
     makeNrSlider(519, 418, 100, 800, (int)std::lround(g_dlssNr.maxRatio * 100));
-    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 468, 200, 22, g_settings, (HMENU)516, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 498, 300, 22, g_settings, (HMENU)517, inst, nullptr);
+    makeNrSlider(521, 468, 0, 100, (int)std::lround(g_dlssNr.colorStrength * 100));
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 508, 200, 22, g_settings, (HMENU)516, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 538, 300, 22, g_settings, (HMENU)517, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 110, 84, 100, 22, g_settings, (HMENU)102, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 216, 84, 80, 22, g_settings, (HMENU)103, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 302, 84, 100, 22, g_settings, (HMENU)104, inst, nullptr);
@@ -831,7 +841,7 @@ bool overlayInit(HINSTANCE inst, HWND output) {
       WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 462, 340, 24, g_settings, (HMENU)203, inst, nullptr);
     CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 462, 80, 24, g_settings, (HMENU)204, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)205, inst, nullptr);
-    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)520, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 342, 578, 112, 30, g_settings, (HMENU)520, inst, nullptr);
     CheckDlgButton(g_settings, 101, g_cfg.fps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 102, g_cfg.frametime ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 103, g_cfg.frame_timing ? BST_CHECKED : BST_UNCHECKED);
