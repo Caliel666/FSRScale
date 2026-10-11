@@ -31,5 +31,6 @@ Persistent settings belong in `scaleconfig.ini` and include enable, model scale,
 - Reuse Vulkan device, shared allocations, pipelines, and history; rebuild only on resolution/model-scale changes.
 - Run before FSR, at captured/render resolution.
 - Pass NRLive's current motion vectors and reset history when capture, dimensions, or temporal continuity resets.
+- The optional residual stabilizer is GPU-only and motion-reprojected. NRLive does not currently capture real game depth, so it cannot perform the reference stabilizer's depth/surface rejection and may ghost on disocclusions.
 - If initialization or a frame fails, pass the original colour through unchanged and keep FSR/FG operational.
 - Verify build/tests in GitHub Actions; GPU runtime quality/performance must still be measured on RDNA4 hardware.
