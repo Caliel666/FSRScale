@@ -46,7 +46,7 @@ nr::Controls makeControls(const NRLiveDlssNrSettings& s) {
     c.local_structure = std::clamp(s.structure, 0.0f, 2.0f);
     c.skin_structure = std::clamp(s.skin_structure, -1.0f, 2.0f);
     c.automatic_mask = s.automatic_skin_mask != 0;
-    c.passes = std::clamp(s.passes, 1, 4);
+    c.passes = std::clamp(s.passes, 1, 3);
     return c;
 }
 }
@@ -88,7 +88,7 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
         }
         host->session->set_model_scale(host->activeScale);
         host->session->set_history_strength(std::clamp(settings->history_strength, 0.0f, 1.0f));
-        host->session->set_max_passes(std::clamp(settings->passes, 1, 4));
+        host->session->set_max_passes(std::clamp(settings->passes, 1, 3));
 
         nr::pe::Session::D3D12QueueFrame frame{};
         frame.device = device;
