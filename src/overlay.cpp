@@ -85,7 +85,7 @@ static void loadCfg() {
   g_dlssNr.modelScale = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"scale", 100, ini.c_str()), 25, 100) / 100.0f;
   g_dlssNr.style = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"style", 0, ini.c_str()), 0, 2);
   g_dlssNr.intensity = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"intensity", 100, ini.c_str()), 0, 200) / 100.0f;
-  g_dlssNr.colorStrength = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"color_strength", 100, ini.c_str()), 0, 100) / 100.0f;
+  g_dlssNr.colorStrength = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"color_strength", 0, ini.c_str()), 0, 100) / 100.0f;
   g_dlssNr.localTone = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"local_tone", 100, ini.c_str()), 0, 200) / 100.0f;
   g_dlssNr.maxRatio = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"max_ratio", 200, ini.c_str()), 100, 800) / 100.0f;
   g_dlssNr.structure = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"structure", 100, ini.c_str()), 0, 200) / 100.0f;
@@ -93,6 +93,7 @@ static void loadCfg() {
   g_dlssNr.historyStrength = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"history_strength", 80, ini.c_str()), 0, 100) / 100.0f;
   g_dlssNr.automaticSkinMask = GetPrivateProfileIntW(L"DLSSNR", L"automatic_skin_mask", 1, ini.c_str()) != 0;
   g_dlssNr.stabilizer = GetPrivateProfileIntW(L"DLSSNR", L"stabilizer", 0, ini.c_str()) != 0;
+  g_dlssNr.passes = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"passes", 1, ini.c_str()), 1, 4);
   g_sharpness = std::clamp(GetPrivateProfileIntW(L"FSR", L"sharpness", 65, ini.c_str()) / 100.0f, 0.0f, 1.0f);
   g_cfg.fps = GetPrivateProfileIntW(L"FPS", L"fps", 1, ini.c_str()) != 0;
   g_cfg.frametime = GetPrivateProfileIntW(L"FPS", L"frametime", 1, ini.c_str()) != 0;
@@ -143,6 +144,7 @@ static void saveCfg() {
   swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.historyStrength * 100)); WritePrivateProfileStringW(L"DLSSNR", L"history_strength", nrValue, ini.c_str());
   WritePrivateProfileStringW(L"DLSSNR", L"automatic_skin_mask", g_dlssNr.automaticSkinMask ? L"1" : L"0", ini.c_str());
   WritePrivateProfileStringW(L"DLSSNR", L"stabilizer", g_dlssNr.stabilizer ? L"1" : L"0", ini.c_str());
+  swprintf_s(nrValue, L"%d", std::clamp(g_dlssNr.passes, 1, 4)); WritePrivateProfileStringW(L"DLSSNR", L"passes", nrValue, ini.c_str());
   wchar_t sharpnessValue[16]{}; swprintf_s(sharpnessValue, L"%d", (int)std::lround(g_sharpness * 100.0f));
   WritePrivateProfileStringW(L"FSR", L"sharpness", sharpnessValue, ini.c_str());
 }
@@ -421,7 +423,8 @@ static void paintSettings(HWND h, HDC dc) {
     drawText(dc, value, 24, 86, 13, C_TEXT, false);
     swprintf_s(value, L"Model scale: %.2f", g_dlssNr.modelScale); drawText(dc, value, 24, 122, 13, C_TEXT, false);
     swprintf_s(value, L"Intensity: %.2f", g_dlssNr.intensity); drawText(dc, value, 24, 172, 13, C_TEXT, false);
-    swprintf_s(value, L"Colour strength: %.2f", g_dlssNr.colorStrength); drawText(dc, value, 24, 472, 13, C_TEXT, false);
+    swprintf_s(value, L"Multipass refinement: %d", g_dlssNr.passes); drawText(dc, value, 24, 472, 13, C_TEXT, false);
+     swprintf_s(value, L"NR colour blend: %.2f", g_dlssNr.colorStrength); drawText(dc, value, 24, 522, 13, C_TEXT, false);
     swprintf_s(value, L"Structure: %.2f", g_dlssNr.structure); drawText(dc, value, 24, 222, 13, C_TEXT, false);
     swprintf_s(value, L"Skin structure: %.2f", g_dlssNr.skinStructure); drawText(dc, value, 24, 272, 13, C_TEXT, false);
     swprintf_s(value, L"Temporal history: %.2f", g_dlssNr.historyStrength); drawText(dc, value, 24, 322, 13, C_TEXT, false);
@@ -524,7 +527,7 @@ static void setSettingsTab(HWND h, bool dlssNr) {
   for (int id : generalIds)
     if (HWND control = GetDlgItem(h, id))
       ShowWindow(control, dlssNr ? SW_HIDE : SW_SHOW);
-  for (int id = 510; id <= 521; ++id)
+  for (int id = 510; id <= 522; ++id)
     if (HWND control = GetDlgItem(h, id))
       ShowWindow(control, dlssNr ? SW_SHOW : SW_HIDE);
 }
@@ -547,6 +550,7 @@ static void invalidateNrValue(HWND h, int controlId) {
     case 518: y = 372; break;
     case 519: y = 422; break;
     case 521: y = 472; break;
+      case 522: y = 522; break;
     default: return;
   }
   RECT valueArea{20, y - 2, 456, y + 22};
@@ -700,8 +704,12 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   if (m == WM_HSCROLL) {
     HWND ctrl = (HWND)l;
-    if (ctrl == GetDlgItem(h, 521)) {
+    if (ctrl == GetDlgItem(h, 522)) {
       g_dlssNr.colorStrength = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 521);
+    } else if (ctrl == GetDlgItem(h, 521)) {
+      g_dlssNr.passes = std::clamp((int)SendMessageW(ctrl, TBM_GETPOS, 0, 0), 1, 4);
       if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
       invalidateNrValue(h, 521);
     } else if (ctrl == GetDlgItem(h, 511)) {
@@ -797,7 +805,8 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     makeNrSlider(515, 318, 0, 100, (int)std::lround(g_dlssNr.historyStrength * 100));
     makeNrSlider(518, 368, 0, 200, (int)std::lround(g_dlssNr.localTone * 100));
     makeNrSlider(519, 418, 100, 800, (int)std::lround(g_dlssNr.maxRatio * 100));
-    makeNrSlider(521, 468, 0, 100, (int)std::lround(g_dlssNr.colorStrength * 100));
+    makeNrSlider(521, 468, 1, 4, g_dlssNr.passes);
+     makeNrSlider(522, 518, 0, 100, (int)std::lround(g_dlssNr.colorStrength * 100));
     CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 508, 200, 22, g_settings, (HMENU)516, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 538, 300, 22, g_settings, (HMENU)517, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 110, 84, 100, 22, g_settings, (HMENU)102, inst, nullptr);
