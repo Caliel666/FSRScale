@@ -1,6 +1,8 @@
 #include "dlssnr_stabilizer.h"
 #include <d3dcompiler.h>
 #include <algorithm>
+#include <cstring>
+#include <climits>
 
 namespace {
 constexpr UINT kSets=8, kViews=6;
