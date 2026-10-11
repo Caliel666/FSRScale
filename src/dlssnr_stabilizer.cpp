@@ -120,7 +120,7 @@ ID3D12Resource* DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsComm
   barrier(cmd,motion,motionState,kRead);barrier(cmd,m_output.Get(),m_outputState,kWrite);barrier(cmd,m_history[1-m_current].Get(),kRead,kWrite);
   ID3D12DescriptorHeap* heaps[]={m_heap.Get()};cmd->SetDescriptorHeaps(1,heaps);
   cmd->SetComputeRootSignature(m_root.Get());cmd->SetPipelineState(m_pipeline.Get());cmd->SetComputeRootDescriptorTable(0,gpu);
-  struct Params{UINT w,h,mvW,mvH;float alpha,delta,intensity,colourStrength,maxRatio;UINT validHistory,pad;} p{m_width,m_height,(UINT)desc.Width,(UINT)desc.Height,std::clamp(historyStrength,0.0f,0.95f),6.0f/255.0f,std::clamp(intensity,0.0f,2.0f),std::clamp(colorStrength,0.0f,1.0f),std::clamp(maxRatio,1.0f,8.0f),(m_hasHistory&&!resetHistory)?1u:0u,0};
+  struct Params{UINT w,h,mvW,mvH;float alpha,delta,intensity,colourStrength,maxRatio;UINT validHistory,pad;} p{m_width,m_height,(UINT)desc.Width,(UINT)desc.Height,std::clamp(historyStrength,0.0f,0.95f),0.02f+0.08f*std::clamp(historyStrength,0.0f,1.0f),std::clamp(intensity,0.0f,2.0f),std::clamp(colorStrength,0.0f,1.0f),std::clamp(maxRatio,1.0f,8.0f),(m_hasHistory&&!resetHistory)?1u:0u,0};
   cmd->SetComputeRoot32BitConstants(1,11,&p,0);cmd->Dispatch((m_width+7)/8,(m_height+7)/8,1);
   barrier(cmd,result,kRead,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   barrier(cmd,m_output.Get(),kWrite,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
