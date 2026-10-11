@@ -186,7 +186,7 @@ jobs:
           Copy-Item "build/dlssnr-runtime/DLSSNR-AMD-LICENSE.txt" $package -Force
           Copy-Item "build/dlssnr-runtime/DLSSNR-AMD-UPSTREAM-README.txt" $package -Force
           Copy-Item "build/dlssnr-runtime/dlssnr-amd" $package -Recurse -Force
-          Copy-Item "docs/dlssnr-runtime-LICENSE.txt" "$package/DLSSNR-AMD-SETUP.txt" -Force
+          Copy-Item "docs/DLSSNR-AMD-SETUP.txt" "$package/DLSSNR-AMD-SETUP.txt" -Force
 
           foreach ($file in @(
             "NRLiveUI.exe",
