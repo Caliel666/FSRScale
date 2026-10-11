@@ -7,6 +7,39 @@ out=$(realpath "$out")
 src=$(realpath "$src")
 repo=$(cd "$(dirname "$0")/.." && pwd)
 cd "$src"
+# Extend the pinned upstream queue-frame contract so the host can provide a
+# fresh immutable input and a separate destination. The bridge already supports
+# BridgeInputs::source; expose it on D3D12QueueFrame instead of mutating the
+# capture pool's texture in place.
+python3 - <<'PY'
+from pathlib import Path
+h = Path("windows/src/pe/nr_pe_session.hpp")
+s = h.read_text()
+old = """        ID3D12Resource* target{};
+        D3D12_RESOURCE_STATES target_state{D3D12_RESOURCE_STATE_RENDER_TARGET};
+        ID3D12Resource* motion{};"""
+new = """        ID3D12Resource* target{};
+        D3D12_RESOURCE_STATES target_state{D3D12_RESOURCE_STATE_RENDER_TARGET};
+        ID3D12Resource* source{};
+        D3D12_RESOURCE_STATES source_state{D3D12_RESOURCE_STATE_COMMON};
+        ID3D12Resource* motion{};"""
+if old in s:
+    h.write_text(s.replace(old, new, 1))
+elif new not in s:
+    raise SystemExit("Could not patch D3D12QueueFrame source fields")
+
+p = Path("windows/src/pe/nr_pe_session.cpp")
+s = p.read_text()
+old = """    in.target = f.target; in.target_state = f.target_state;
+    in.motion = f.motion; in.motion_state = f.motion_state;"""
+new = """    in.target = f.target; in.target_state = f.target_state;
+    in.source = f.source; in.source_state = f.source_state;
+    in.motion = f.motion; in.motion_state = f.motion_state;"""
+if old in s:
+    p.write_text(s.replace(old, new, 1))
+elif new not in s:
+    raise SystemExit("Could not patch D3D12 queue frame source forwarding")
+PY
 source windows/build/arch/rdna4.sh
 python3 windows/build/generate_device_chain.py toolchain/Vulkan-Headers "$out/generated/nr_device_chain_sizes.hpp"
 cxx=x86_64-w64-mingw32-g++
