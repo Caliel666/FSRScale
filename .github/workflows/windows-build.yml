@@ -162,7 +162,8 @@ jobs:
             "DLSSNR-AMD-UPSTREAM-README.txt",
             "DLSSNR-AMD-SETUP.txt"
           )) {
-            if (-not (Test-Path "build/Release/$dll")) { throw "$dll was not staged beside NRLive.exe." }
+            $runtimePath = if ($dll -in @("NRLiveDlssNrBridge.dll", "dlssnr_extract_model.exe", "DLSSNR-AMD-LICENSE.txt", "DLSSNR-AMD-UPSTREAM-README.txt")) { "build/dlssnr-runtime/$dll" } else { "build/Release/$dll" }
+            if (-not (Test-Path $runtimePath)) { throw "$dll was not staged: $runtimePath" }
           }
 
       - name: Publish and assemble portable launcher package
