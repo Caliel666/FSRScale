@@ -255,6 +255,15 @@ bool Graphics::buildSwapChain(Size display)
     if (!m_allocContinuation[i])
       hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocContinuation[i])));
   }
+  // Allocator slots are independent of the swapchain's two backbuffers.
+  // Three slots let the CPU queue frames without resetting an allocator that
+  // the GPU may still be using.
+  for (int i = 2; i < 3; ++i) {
+    if (!m_alloc[i])
+      hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_alloc[i])));
+    if (!m_allocContinuation[i])
+      hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocContinuation[i])));
+  }
 
   m_upscaleOutput.Reset();
   {
@@ -361,9 +370,17 @@ bool Graphics::init(HWND output, Size render, Size display)
 
 bool Graphics::begin()
 {
+  // Wait only when this CPU command-allocator slot is about to be reused.
+  // Do not key allocator lifetime to the wrapped swapchain's backbuffer index:
+  // frame interpolation can advance presentation independently of base frames.
+  const uint64_t slotFence = m_frameSlotFence[m_frameSlot];
+  if (slotFence && m_fence->GetCompletedValue() < slotFence) {
+    m_fence->SetEventOnCompletion(slotFence, m_fenceEvent);
+    WaitForSingleObject(m_fenceEvent, INFINITE);
+  }
   m_interopContinuation = false;
-  m_alloc[m_index]->Reset();
-  cmd()->Reset(m_alloc[m_index].Get(), nullptr);
+  m_alloc[m_frameSlot]->Reset();
+  cmd()->Reset(m_alloc[m_frameSlot].Get(), nullptr);
 
   // The capture pipeline has no real game depth. Always clear the synthetic
   // depth to deterministic far depth before FSR sees it; an uninitialized
@@ -391,9 +408,9 @@ bool Graphics::submitForInterop()
 
   // The second allocator/list pair records the post-NR FSR work. The queue
   // bridge inserts its own GPU fence wait; there is no CPU wait in this path.
-  if (FAILED(m_allocContinuation[m_index]->Reset()))
+  if (FAILED(m_allocContinuation[m_frameSlot]->Reset()))
     return false;
-  if (FAILED(m_cmdContinuation->Reset(m_allocContinuation[m_index].Get(), nullptr)))
+  if (FAILED(m_cmdContinuation->Reset(m_allocContinuation[m_frameSlot].Get(), nullptr)))
     return false;
   m_interopContinuation = true;
   return true;
@@ -636,14 +653,12 @@ bool Graphics::present()
   // Sync interval 0 = no vsync wait on CPU.
   m_swap->Present(0, 0);
 
-  // Signal this submission, but don't globally wait for the preceding
-  // frame here. With the two-buffer FSR interpolation swapchain, waiting on
-  // v-1 serializes every base frame behind FG's GPU work and can halve the
-  // input rate. The per-backbuffer fence below still protects allocator and
-  // backbuffer reuse; screenshot requests retain their explicit completion wait.
+  // Fence the allocator slot used by this frame. The three-slot ring protects
+  // D3D12 allocator reuse while allowing two or more frames to remain queued.
+  // The swapchain's current index selects the render target, not the allocator.
   const uint64_t v = ++m_fenceValue;
   m_queue->Signal(m_fence.Get(), v);
-  m_frameFence[m_index] = v;
+  m_frameSlotFence[m_frameSlot] = v;
 
   // A screenshot is synchronized only on the frame that requested it.
   // This guarantees the PNG contains the post-FSR backbuffer while normal
@@ -674,12 +689,10 @@ bool Graphics::present()
   }
 
   m_index = m_swap->GetCurrentBackBufferIndex();
-  // Wait only if this backbuffer is still in flight
-  const uint64_t bbFence = m_frameFence[m_index];
-  if (bbFence && m_fence->GetCompletedValue() < bbFence) {
-    m_fence->SetEventOnCompletion(bbFence, m_fenceEvent);
-    WaitForSingleObject(m_fenceEvent, 1000);
-  }
+  // The D3D12 queue serializes work that targets the same backbuffer. DXGI
+  // chooses the next available buffer; do not CPU-wait here for the prior
+  // buffer fence, which throttles base-frame submission under FSR FG.
+  m_frameSlot = (m_frameSlot + 1) % 3;
   m_interopContinuation = false;
   return true;
 }
