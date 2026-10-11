@@ -10,7 +10,7 @@ const char* kShader=R"(
 Texture2D<float4> source:register(t0); Texture2D<float4> result:register(t1);
 Texture2D<float2> motion:register(t2); Texture2D<float4> history:register(t3);
 RWTexture2D<float4> output:register(u0); RWTexture2D<float4> next:register(u1);
-cbuffer Params:register(b0){uint w,h,mvW,mvH;float alpha,delta,colourStrength;uint validHistory,pad;}
+cbuffer Params:register(b0){uint w,h,mvW,mvH;float alpha,delta,colourStrength,maxRatio;uint validHistory,pad;}
 float3 E(float3 c){c=max(c,0);return c/(1+c);}
 float3 Einv(float3 y){y=clamp(y,0,.999);return min(y/max(1-y,1e-5),1);}
 float luminance(float3 c){return dot(c,float3(.2126,.7152,.0722));}
@@ -31,7 +31,7 @@ float luminance(float3 c){return dot(c,float3(.2126,.7152,.0722));}
  // Colour strength 0 preserves the game's original hue while applying the
  // network's luminance correction; 1 retains the full network RGB result.
  float3 ea=E(adjusted);
- float ratio=clamp(luminance(ea)/max(luminance(eb),1e-4),0,8);
+ float ratio=clamp(luminance(ea)/max(luminance(eb),1e-4),0,maxRatio);
  float3 huePreserving=Einv(eb*ratio);
  float3 composed=lerp(huePreserving,adjusted,saturate(colourStrength));
  output[id.xy]=float4(composed,o.a);
@@ -59,7 +59,7 @@ bool DlssNrStabilizer::build(ID3D12Device* device) {
   params[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
   params[0].DescriptorTable={2,ranges};
   params[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-  params[1].Constants={0,0,9};
+  params[1].Constants={0,0,10};
   D3D12_ROOT_SIGNATURE_DESC rd{}; rd.NumParameters=2; rd.pParameters=params;
   ComPtr<ID3DBlob> sig,errors,cs;
   if(FAILED(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&sig,&errors)))return false;
@@ -98,7 +98,7 @@ bool DlssNrStabilizer::ensureResources(ID3D12Resource* result) {
 
 ID3D12Resource* DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsCommandList* cmd,
     ID3D12Resource* original,ID3D12Resource* result,ID3D12Resource* motion,
-    D3D12_RESOURCE_STATES motionState,bool resetHistory,float stabilizerStrength,float colorStrength) {
+    D3D12_RESOURCE_STATES motionState,bool resetHistory,float stabilizerStrength,float colorStrength,float maxRatio) {
   if(!device||!cmd||!original||!result||!motion||!build(device)||!ensureResources(result))return nullptr;
   auto desc=motion->GetDesc(); if(desc.Width==0||desc.Height==0)return nullptr;
   UINT stride=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -115,8 +115,8 @@ ID3D12Resource* DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsComm
   barrier(cmd,motion,motionState,kRead);barrier(cmd,m_output.Get(),m_outputState,kWrite);barrier(cmd,m_history[1-m_current].Get(),kRead,kWrite);
   ID3D12DescriptorHeap* heaps[]={m_heap.Get()};cmd->SetDescriptorHeaps(1,heaps);
   cmd->SetComputeRootSignature(m_root.Get());cmd->SetPipelineState(m_pipeline.Get());cmd->SetComputeRootDescriptorTable(0,gpu);
-  struct Params{UINT w,h,mvW,mvH;float alpha,delta,colourStrength;UINT validHistory,pad;} p{m_width,m_height,(UINT)desc.Width,(UINT)desc.Height,std::clamp(stabilizerStrength,0.0f,0.95f),6.0f/255.0f,std::clamp(colorStrength,0.0f,1.0f),(m_hasHistory&&!resetHistory)?1u:0u,0};
-  cmd->SetComputeRoot32BitConstants(1,9,&p,0);cmd->Dispatch((m_width+7)/8,(m_height+7)/8,1);
+  struct Params{UINT w,h,mvW,mvH;float alpha,delta,colourStrength,maxRatio;UINT validHistory,pad;} p{m_width,m_height,(UINT)desc.Width,(UINT)desc.Height,std::clamp(stabilizerStrength,0.0f,0.95f),6.0f/255.0f,std::clamp(colorStrength,0.0f,1.0f),std::clamp(maxRatio,1.0f,8.0f),(m_hasHistory&&!resetHistory)?1u:0u,0};
+  cmd->SetComputeRoot32BitConstants(1,10,&p,0);cmd->Dispatch((m_width+7)/8,(m_height+7)/8,1);
   barrier(cmd,result,kRead,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   barrier(cmd,m_output.Get(),kWrite,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   m_outputState=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
