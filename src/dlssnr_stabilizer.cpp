@@ -10,15 +10,16 @@ const char* kShader=R"(
 Texture2D<float4> source:register(t0); Texture2D<float4> result:register(t1);
 Texture2D<float2> motion:register(t2); Texture2D<float4> history:register(t3);
 RWTexture2D<float4> output:register(u0); RWTexture2D<float4> next:register(u1);
-cbuffer Params:register(b0){uint w,h,mvW,mvH;float alpha,delta;uint validHistory,pad;}
+cbuffer Params:register(b0){uint w,h,mvW,mvH;float alpha,delta,colourStrength;uint validHistory,pad;}
 float3 E(float3 c){c=max(c,0);return c/(1+c);}
 float3 Einv(float3 y){y=clamp(y,0,.999);return min(y/max(1-y,1e-5),1);}
+float luminance(float3 c){return dot(c,float3(.2126,.7152,.0722));}
 [numthreads(8,8,1)] void main(uint3 id:SV_DispatchThreadID){
  if(id.x>=w||id.y>=h)return;
  float4 o=result.Load(int3(id.xy,0));
  float3 base=source.Load(int3(id.xy,0)).rgb;
- float3 r=E(o.rgb)-E(base), stable=r;
- if(validHistory!=0){
+ float3 eb=E(base), r=E(o.rgb)-eb, stable=r;
+ if(validHistory!=0 && alpha>0){
    float2 v=motion.Load(int3(min(id.xy,uint2(mvW-1,mvH-1)),0));
    int2 p=int2(round(float2(id.xy)+v));
    if(p.x>=0&&p.y>=0&&p.x<int(w)&&p.y<int(h)){
@@ -26,7 +27,14 @@ float3 Einv(float3 y){y=clamp(y,0,.999);return min(y/max(1-y,1e-5),1);}
      if(old.a>.5) stable=r+alpha*(clamp(old.rgb,r-delta,r+delta)-r);
    }
  }
- output[id.xy]=float4(Einv(E(base)+stable),o.a);
+ float3 adjusted=Einv(eb+stable);
+ // Colour strength 0 preserves the game's original hue while applying the
+ // network's luminance correction; 1 retains the full network RGB result.
+ float3 ea=E(adjusted);
+ float ratio=clamp(luminance(ea)/max(luminance(eb),1e-4),0,8);
+ float3 huePreserving=Einv(eb*ratio);
+ float3 composed=lerp(huePreserving,adjusted,saturate(colourStrength));
+ output[id.xy]=float4(composed,o.a);
  next[id.xy]=float4(stable,1);
 })";
 
@@ -51,7 +59,7 @@ bool DlssNrStabilizer::build(ID3D12Device* device) {
   params[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
   params[0].DescriptorTable={2,ranges};
   params[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-  params[1].Constants={0,0,8};
+  params[1].Constants={0,0,9};
   D3D12_ROOT_SIGNATURE_DESC rd{}; rd.NumParameters=2; rd.pParameters=params;
   ComPtr<ID3DBlob> sig,errors,cs;
   if(FAILED(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&sig,&errors)))return false;
@@ -107,8 +115,8 @@ ID3D12Resource* DlssNrStabilizer::record(ID3D12Device* device,ID3D12GraphicsComm
   barrier(cmd,motion,motionState,kRead);barrier(cmd,m_output.Get(),m_outputState,kWrite);barrier(cmd,m_history[1-m_current].Get(),kRead,kWrite);
   ID3D12DescriptorHeap* heaps[]={m_heap.Get()};cmd->SetDescriptorHeaps(1,heaps);
   cmd->SetComputeRootSignature(m_root.Get());cmd->SetPipelineState(m_pipeline.Get());cmd->SetComputeRootDescriptorTable(0,gpu);
-  struct Params{UINT w,h,mvW,mvH;float alpha,delta;UINT validHistory,pad;} p{m_width,m_height,(UINT)desc.Width,(UINT)desc.Height,0.45f,6.0f/255.0f,(m_hasHistory&&!resetHistory)?1u:0u,0};
-  cmd->SetComputeRoot32BitConstants(1,8,&p,0);cmd->Dispatch((m_width+7)/8,(m_height+7)/8,1);
+  struct Params{UINT w,h,mvW,mvH;float alpha,delta,colourStrength;UINT validHistory,pad;} p{m_width,m_height,(UINT)desc.Width,(UINT)desc.Height,std::clamp(stabilizerStrength,0.0f,0.95f),6.0f/255.0f,std::clamp(colorStrength,0.0f,1.0f),(m_hasHistory&&!resetHistory)?1u:0u,0};
+  cmd->SetComputeRoot32BitConstants(1,9,&p,0);cmd->Dispatch((m_width+7)/8,(m_height+7)/8,1);
   barrier(cmd,result,kRead,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   barrier(cmd,m_output.Get(),kWrite,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   m_outputState=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
