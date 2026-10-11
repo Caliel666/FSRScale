@@ -7,6 +7,7 @@
 #include "dlssnr_bridge_api.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -17,6 +18,9 @@ struct HostSession {
     std::unique_ptr<nr::pe::Session> session;
     std::string error;
     std::mutex mutex;
+    float requestedScale = -1.0f;
+    float activeScale = 1.0f;
+    bool fallbackTried = false;
 };
 
 std::string utf8(const wchar_t* value) {
@@ -75,7 +79,13 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
 
     std::lock_guard lock(host->mutex);
     try {
-        host->session->set_model_scale(std::clamp(settings->model_scale, 0.25f, 1.0f));
+        const float requestedScale = std::clamp(settings->model_scale, 0.25f, 1.0f);
+        if (std::abs(requestedScale - host->requestedScale) > 0.001f) {
+            host->requestedScale = requestedScale;
+            host->activeScale = requestedScale;
+            host->fallbackTried = false;
+        }
+        host->session->set_model_scale(host->activeScale);
         host->session->set_history_strength(std::clamp(settings->history_strength, 0.0f, 1.0f));
         host->session->set_max_passes(std::clamp(settings->passes, 1, 4));
 
@@ -101,9 +111,29 @@ extern "C" __declspec(dllexport) int NRLiveDlssNrProcess(
         }
         frame.depth = nullptr; // NRLive does not currently capture real game depth.
         frame.reset = reset_history != 0;
-        const bool ok = host->session->run_d3d12_queue(frame, makeControls(*settings));
+        auto controls = makeControls(*settings);
+        bool ok = host->session->run_d3d12_queue(frame, controls);
+        // Allocation checks can reject scale 1.0 by only a few MB even when
+        // there is ample total VRAM. Retry once per user-selected scale at
+        // progressively smaller model sizes rather than leaving NR permanently
+        // unavailable until restart. Keep the successful scale for later frames.
+        if (!ok && !host->fallbackTried) {
+            host->fallbackTried = true;
+            const float requested = host->activeScale;
+            for (float candidate = std::floor((requested - 0.001f) * 10.0f) / 10.0f;
+                 candidate >= 0.25f && !ok; candidate = std::round((candidate - 0.1f) * 100.0f) / 100.0f) {
+                host->session->set_model_scale(candidate);
+                ok = host->session->run_d3d12_queue(frame, controls);
+                if (ok) {
+                    host->activeScale = candidate;
+                    host->error = "DLSSNR memory guard rejected model scale " +
+                        std::to_string(requested) + "; running at fallback scale " +
+                        std::to_string(candidate) + ". Increase available RAM/page file or lower Model scale to restore the requested setting.";
+                }
+            }
+        }
         if (!ok) host->error = "DLSSNR did not run this frame; inspect dlssnr-amd.log for the runtime reason.";
-        else host->error.clear();
+        else if (host->error.empty()) host->error.clear();
         return ok ? 1 : 0;
     } catch (const std::exception& e) {
         host->error = e.what();
