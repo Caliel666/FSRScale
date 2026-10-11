@@ -5,6 +5,7 @@
 #include <wrl.h>
 #include <cstdint>
 #include <string>
+#include <vector>
 using Microsoft::WRL::ComPtr;
 
 struct Size { uint32_t w = 0, h = 0; };
@@ -21,6 +22,7 @@ public:
   // Submit the current prep command list and open a second list for the same frame.
   // Used to place the cross-API DLSSNR pass between motion generation and FSR without a CPU wait.
   bool submitForInterop();
+  ID3D12Resource* snapshotDlssNrInput(ID3D12Resource* colour, D3D12_RESOURCE_STATES colourState);
   void end();
   ID3D12Device* device() const { return m_dev.Get(); }
   IDXGISwapChain4* swapChain() const { return m_swap.Get(); }
@@ -75,6 +77,9 @@ private:
   ComPtr<ID3D12GraphicsCommandList> m_cmd;
   ComPtr<ID3D12GraphicsCommandList> m_cmdContinuation;
   bool m_interopContinuation = false;
+  ComPtr<ID3D12Resource> m_dlssNrInput;
+  std::vector<ComPtr<ID3D12Resource>> m_retiredDlssNrInputs;
+  D3D12_RESOURCE_STATES m_dlssNrInputState = D3D12_RESOURCE_STATE_COMMON;
   ComPtr<ID3D12Fence> m_fence;
   HANDLE m_fenceEvent = nullptr;
   uint64_t m_fenceValue = 0;
