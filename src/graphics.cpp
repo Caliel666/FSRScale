@@ -399,6 +399,40 @@ bool Graphics::submitForInterop()
   return true;
 }
 
+ID3D12Resource* Graphics::snapshotDlssNrInput(ID3D12Resource* colour, D3D12_RESOURCE_STATES colourState)
+{
+  if (!colour || !m_dev || !cmd()) return nullptr;
+  const auto desc = colour->GetDesc();
+  if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.Width == 0 || desc.Height == 0)
+    return nullptr;
+  if (!m_dlssNrInput || m_dlssNrInput->GetDesc().Width != desc.Width ||
+      m_dlssNrInput->GetDesc().Height != desc.Height ||
+      m_dlssNrInput->GetDesc().Format != desc.Format) {
+    if (m_dlssNrInput) m_retiredDlssNrInputs.push_back(std::move(m_dlssNrInput));
+    auto snapshotDesc = desc;
+    snapshotDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    snapshotDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    D3D12_HEAP_PROPERTIES hp{}; hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+    if (FAILED(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &snapshotDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_dlssNrInput))))
+      return nullptr;
+    m_dlssNrInputState = D3D12_RESOURCE_STATE_COMMON;
+  }
+  D3D12_RESOURCE_BARRIER before[2]{};
+  before[0].Type = before[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  before[0].Transition = { colour, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, colourState, D3D12_RESOURCE_STATE_COPY_SOURCE };
+  before[1].Transition = { m_dlssNrInput.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, m_dlssNrInputState, D3D12_RESOURCE_STATE_COPY_DEST };
+  cmd()->ResourceBarrier(2, before);
+  cmd()->CopyResource(m_dlssNrInput.Get(), colour);
+  D3D12_RESOURCE_BARRIER after[2]{};
+  after[0].Type = after[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  after[0].Transition = { colour, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_SOURCE, colourState };
+  after[1].Transition = { m_dlssNrInput.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE };
+  cmd()->ResourceBarrier(2, after);
+  m_dlssNrInputState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  return m_dlssNrInput.Get();
+}
+
 void Graphics::end() { cmd()->Close(); }
 
 bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t frameIndex)
