@@ -1,6 +1,8 @@
 #include "graphics.h"
 #include "capture.h"
 #include "fsr.h"
+#include "dlssnr.h"
+#include "dlssnr_stabilizer.h"
 #include "amdof.h"
 #include "fastmv.h"
 #include "ui.h"
@@ -159,9 +161,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
   HWND out = createOutput(inst, 1280, 720);
   if (!out) return 1;
-  // DXGI Desktop Duplication must not recursively capture NRLive's own
-  // fullscreen presentation window.
-  SetWindowDisplayAffinity(out, WDA_EXCLUDEFROMCAPTURE);
+  // Keep the presentation surface capturable by OBS and other desktop capture
+  // tools. The DXGI capture implementation excludes NRLive by HWND/source
+  // selection; WDA_EXCLUDEFROMCAPTURE also hides this output from OBS.
+  SetWindowDisplayAffinity(out, WDA_NONE);
 
   constexpr int kStopId = 0x4653;
   bool hk = RegisterHotKey(nullptr, kStopId,
@@ -228,6 +231,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     // It loads as dxgi.dll and attaches on CreateDevice/CreateSwapChain (already done).
     Sleep(50);
 
+    DlssNrRuntime dlssNr;
+    DlssNrStabilizer dlssNrStabilizer;
+    std::wstring lastDlssNrError;
+    bool lastDlssNrStabilizerEnabled = false;
     Fsr fsr;
     bool fsrOk = fsr.init(gfx.device(), display, display);
     logMain(fsrOk ? L"FSR upscaler init OK: " + fsr.lastError() : L"FSR upscaler init FAILED: " + fsr.lastError());
@@ -315,6 +322,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       if (!running) break;
 
       pollOverlayToggle(spec);
+      if (overlayConsumeDlssNrToggle()) reset = true;
+      const bool stabilizerEnabledNow = overlayDlssNrConfig().stabilizer;
+      if (stabilizerEnabledNow != lastDlssNrStabilizerEnabled) {
+        reset = true;
+        lastDlssNrStabilizerEnabled = stabilizerEnabledNow;
+      }
       if (fsrOk) fsr.setSharpening(true, overlaySharpness());
       const bool overlayOpenNow = isOverlayOpen();
       // Closing the overlay is an intentional handoff back to the game.
@@ -487,6 +500,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       bool usedFsr = false;
       const bool resetThisFrame = reset;
 
+      ID3D12Resource* nrOutputForFrame = nullptr;
       if (fsrEnabled && depth && mv && upscale) {
         // ---- Batch A: pre-OF+FSR prep -------------------------------------
         //   color:   COMMON  -> PS|NPS   (FSR & AMDOF read as SRV)
@@ -516,12 +530,65 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         // new quarter-resolution screen-space estimator.
         bool motionReady = false;
         bool reactiveReady = false;
+        ID3D12Resource* nrStabilizedColour = nullptr;
         if (spec.motionMode == TargetSpec::MotionMode::Fast) {
           motionReady = fastmv.dispatch(cmd, color.Get(), mv, reactive, cs, reset);
           reactiveReady = motionReady;
         } else {
           amdof.dispatch(cmd, color.Get(), mv, cs, reset);
           motionReady = true;
+        }
+
+        // DLSSNR runs after the same-frame motion vectors are ready and before FSR
+        // consumes colour. Its native D3D12/Vulkan bridge submits the current
+        // command list, signals/waits on shared GPU fences, and resumes recording
+        // on a second allocator/list; no CPU readback or GPU-completion wait.
+        if (motionReady) {
+          const auto& nrSettings = overlayDlssNrConfig();
+          if (nrSettings.enabled) {
+            const bool nrAvailable = dlssNr.available();
+            // Never let the bridge write into the capture pool's reusable texture.
+            // Capture's D3D11 producer can otherwise overwrite that same resource
+            // while the previous frame's D3D12/Vulkan write-back is still in flight.
+            // Snapshot each fresh frame, run NR from that immutable snapshot, and
+            // write the result to a separate destination consumed by FSR.
+            ID3D12Resource* nrInputColour = nrAvailable
+                ? gfx.snapshotDlssNrInput(color.Get(),
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+                : nullptr;
+            ID3D12Resource* nrOutputColour = nrAvailable ? gfx.ensureDlssNrOutput(color.Get()) : nullptr;
+            ID3D12Resource* originalColour = nrInputColour;
+            const auto mvState = spec.motionMode == TargetSpec::MotionMode::Fast
+                ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                : (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            const bool nrApplied = nrAvailable && nrInputColour && nrOutputColour &&
+                dlssNr.process(gfx, nrInputColour, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    nrOutputColour, D3D12_RESOURCE_STATE_COMMON, mv, mvState, resetThisFrame, nrSettings);
+            cmd = gfx.cmd(); // the bridge may have switched recording to the continuation list
+            if (nrApplied) {
+              D3D12_RESOURCE_BARRIER nrOutBarrier{};
+              nrOutBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+              nrOutBarrier.Transition.pResource = nrOutputColour;
+              nrOutBarrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+              nrOutBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+              nrOutBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                                                   D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+              cmd->ResourceBarrier(1, &nrOutBarrier);
+              nrOutputForFrame = nrOutputColour;
+              if (originalColour)
+                nrStabilizedColour = dlssNrStabilizer.record(
+                    gfx.device(), cmd, originalColour, nrOutputColour, mv, mvState,
+                    resetThisFrame,
+                    std::max(nrSettings.historyStrength, nrSettings.stabilizer ? 0.45f : 0.0f),
+                    nrSettings.intensity, nrSettings.colorStrength, nrSettings.maxRatio);
+            }
+            if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
+              lastDlssNrError = dlssNr.lastError();
+              logMain(L"DLSSNR: " + lastDlssNrError);
+            } else if (nrApplied) {
+              lastDlssNrError.clear();
+            }
+          }
         }
 
         // FastMv writes both resources as UAV. FSR consumes them as SRVs.
@@ -546,11 +613,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
 
         // FSR dispatch (reads color/depth/mv as SRV, writes upscale as UAV).
         // No barrier needed for mv — AMDOF left it in PS|NPS.
-        usedFsr = motionReady && fsr.dispatch(cmd, color.Get(), depth, mv,
+        ID3D12Resource* fsrInputColour = nrStabilizedColour ? nrStabilizedColour :
+            (nrOutputForFrame ? nrOutputForFrame : color.Get());
+        usedFsr = motionReady && fsr.dispatch(cmd, fsrInputColour, depth, mv,
                                               reactiveReady ? reactive : nullptr,
                                               upscale, cs, display, dt, reset);
         reset = false;
-        presentSrc = usedFsr ? upscale : color.Get();
+        presentSrc = usedFsr ? upscale : fsrInputColour;
 
         // ---- Batch C: post-FSR cleanup + presentation prep ----------------
         //   upscale: UAV -> PS|NPS (if usedFsr, blit reads as SRV)
@@ -659,7 +728,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
       //   color: PS|NPS -> COMMON  (return for next D3D11 copy; always,
       //                              whether or not FSR was used)
       {
-        D3D12_RESOURCE_BARRIER b[2]{};
+        D3D12_RESOURCE_BARRIER b[3]{};
         int n = 0;
         auto tr = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES a, D3D12_RESOURCE_STATES s) {
           b[n].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -673,6 +742,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
         tr(color.Get(),
            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
            D3D12_RESOURCE_STATE_COMMON);
+        if (nrOutputForFrame)
+          tr(nrOutputForFrame,
+             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+             D3D12_RESOURCE_STATE_COMMON);
         cmd->ResourceBarrier(n, b);
       }
 

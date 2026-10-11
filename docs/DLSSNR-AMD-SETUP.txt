@@ -1,0 +1,18 @@
+DLSSNR-AMD setup for NRLive
+===========================
+
+The DLSSNR-AMD Vulkan runtime and shaders are included in this package. The model weights are not:
+upstream does not redistribute them.
+
+To install your own compatible model:
+
+1. Obtain your own NVIDIA nvngx_dlssnr.dll version 310.8.0 from a legitimate installation.
+2. From the NRLive package directory, run:
+   dlssnr_extract_model.exe "C:\path\to\nvngx_dlssnr.dll" "dlssnr-amd\dlssnr.bin"
+3. Wait for the extractor to verify the model and finish writing dlssnr.bin.
+4. Start NRLive, open the overlay, click NR, then open Settings > DLSSNR.
+5. Enable DLSSNR. It will process the captured render-resolution image before FSR and use NRLive's current motion-vector texture.
+
+The first use can spend extra time compiling the neural network. Let the build finish before judging performance. The runtime is experimental and currently targets AMD RDNA4 GPUs. Keep anti-cheat protected online games closed while testing injected or external graphics tools.
+
+If the model file or runtime is missing, NRLive should leave the captured frame unchanged and continue its regular FSR/FG pipeline. Logs are written to NRLive.log and the upstream runtime log.

@@ -124,20 +124,20 @@ void Graphics::blitToBackbuffer(ID3D12Resource* src)
   }
 
   ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
-  m_cmd->SetDescriptorHeaps(1, heaps);
-  m_cmd->SetGraphicsRootSignature(m_blitRs.Get());
-  m_cmd->SetPipelineState(m_blitPso.Get());
-  m_cmd->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+  cmd()->SetDescriptorHeaps(1, heaps);
+  cmd()->SetGraphicsRootSignature(m_blitRs.Get());
+  cmd()->SetPipelineState(m_blitPso.Get());
+  cmd()->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
 
   D3D12_VIEWPORT vp{ 0, 0, (float)m_display.w, (float)m_display.h, 0, 1 };
   D3D12_RECT sc{ 0, 0, (LONG)m_display.w, (LONG)m_display.h };
-  m_cmd->RSSetViewports(1, &vp);
-  m_cmd->RSSetScissorRects(1, &sc);
+  cmd()->RSSetViewports(1, &vp);
+  cmd()->RSSetScissorRects(1, &sc);
 
   auto rtv = rtvHandle();
-  m_cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-  m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  m_cmd->DrawInstanced(3, 1, 0, 0);
+  cmd()->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+  cmd()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  cmd()->DrawInstanced(3, 1, 0, 0);
 }
 
 bool Graphics::createAuxTextures(Size render)
@@ -252,6 +252,17 @@ bool Graphics::buildSwapChain(Size display)
     m_dev->CreateRenderTargetView(m_back[i].Get(), nullptr, h);
     if (!m_alloc[i])
       hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_alloc[i])));
+    if (!m_allocContinuation[i])
+      hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocContinuation[i])));
+  }
+  // Allocator slots are independent of the swapchain's two backbuffers.
+  // Three slots let the CPU queue frames without resetting an allocator that
+  // the GPU may still be using.
+  for (int i = 2; i < 3; ++i) {
+    if (!m_alloc[i])
+      hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_alloc[i])));
+    if (!m_allocContinuation[i])
+      hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocContinuation[i])));
   }
 
   m_upscaleOutput.Reset();
@@ -348,7 +359,10 @@ bool Graphics::init(HWND output, Size render, Size display)
 
   hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_alloc[0].Get(),
                               nullptr, IID_PPV_ARGS(&m_cmd)));
-  hr(m_cmd->Close());
+  hr(cmd()->Close());
+  hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocContinuation[0].Get(),
+                              nullptr, IID_PPV_ARGS(&m_cmdContinuation)));
+  hr(m_cmdContinuation->Close());
   hr(m_dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
   m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   return true;
@@ -356,17 +370,26 @@ bool Graphics::init(HWND output, Size render, Size display)
 
 bool Graphics::begin()
 {
-  m_alloc[m_index]->Reset();
-  m_cmd->Reset(m_alloc[m_index].Get(), nullptr);
+  // Wait only when this CPU command-allocator slot is about to be reused.
+  // Do not key allocator lifetime to the wrapped swapchain's backbuffer index:
+  // frame interpolation can advance presentation independently of base frames.
+  const uint64_t slotFence = m_frameSlotFence[m_frameSlot];
+  if (slotFence && m_fence->GetCompletedValue() < slotFence) {
+    m_fence->SetEventOnCompletion(slotFence, m_fenceEvent);
+    WaitForSingleObject(m_fenceEvent, INFINITE);
+  }
+  m_interopContinuation = false;
+  m_alloc[m_frameSlot]->Reset();
+  cmd()->Reset(m_alloc[m_frameSlot].Get(), nullptr);
 
   // The capture pipeline has no real game depth. Always clear the synthetic
   // depth to deterministic far depth before FSR sees it; an uninitialized
   // UAV here was a major source of temporal instability/smearing.
   if (m_dummyDepth && m_clearGpuHeap && m_clearCpuHeap) {
     ID3D12DescriptorHeap* heaps[] = { m_clearGpuHeap.Get() };
-    m_cmd->SetDescriptorHeaps(1, heaps);
+    cmd()->SetDescriptorHeaps(1, heaps);
     const FLOAT value[4] = { 0.f, 0.f, 0.f, 0.f };
-    m_cmd->ClearUnorderedAccessViewFloat(
+    cmd()->ClearUnorderedAccessViewFloat(
       m_clearGpuHeap->GetGPUDescriptorHandleForHeapStart(),
       m_clearCpuHeap->GetCPUDescriptorHandleForHeapStart(),
       m_dummyDepth.Get(), value, 0, nullptr);
@@ -374,7 +397,88 @@ bool Graphics::begin()
   return true;
 }
 
-void Graphics::end() { m_cmd->Close(); }
+bool Graphics::submitForInterop()
+{
+  if (m_interopContinuation || !m_cmd || !m_cmdContinuation || !m_queue)
+    return false;
+  if (FAILED(cmd()->Close()))
+    return false;
+  ID3D12CommandList* lists[] = { cmd() };
+  m_queue->ExecuteCommandLists(1, lists);
+
+  // The second allocator/list pair records the post-NR FSR work. The queue
+  // bridge inserts its own GPU fence wait; there is no CPU wait in this path.
+  if (FAILED(m_allocContinuation[m_frameSlot]->Reset()))
+    return false;
+  if (FAILED(m_cmdContinuation->Reset(m_allocContinuation[m_frameSlot].Get(), nullptr)))
+    return false;
+  m_interopContinuation = true;
+  return true;
+}
+
+ID3D12Resource* Graphics::snapshotDlssNrInput(ID3D12Resource* colour, D3D12_RESOURCE_STATES colourState)
+{
+  if (!colour || !m_dev || !cmd()) return nullptr;
+  const auto desc = colour->GetDesc();
+  if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.Width == 0 || desc.Height == 0)
+    return nullptr;
+  if (!m_dlssNrInput || m_dlssNrInput->GetDesc().Width != desc.Width ||
+      m_dlssNrInput->GetDesc().Height != desc.Height ||
+      m_dlssNrInput->GetDesc().Format != desc.Format) {
+    if (m_dlssNrInput) m_retiredDlssNrInputs.push_back(std::move(m_dlssNrInput));
+    auto snapshotDesc = desc;
+    snapshotDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    snapshotDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    D3D12_HEAP_PROPERTIES hp{}; hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+    if (FAILED(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &snapshotDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_dlssNrInput))))
+      return nullptr;
+    m_dlssNrInputState = D3D12_RESOURCE_STATE_COMMON;
+  }
+  D3D12_RESOURCE_BARRIER before[2]{};
+  before[0].Type = before[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  before[0].Transition = { colour, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, colourState, D3D12_RESOURCE_STATE_COPY_SOURCE };
+  before[1].Transition = { m_dlssNrInput.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, m_dlssNrInputState, D3D12_RESOURCE_STATE_COPY_DEST };
+  cmd()->ResourceBarrier(2, before);
+  cmd()->CopyResource(m_dlssNrInput.Get(), colour);
+  D3D12_RESOURCE_BARRIER after[2]{};
+  after[0].Type = after[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  after[0].Transition = { colour, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_SOURCE, colourState };
+  after[1].Transition = { m_dlssNrInput.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE };
+  cmd()->ResourceBarrier(2, after);
+  m_dlssNrInputState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  return m_dlssNrInput.Get();
+}
+
+ID3D12Resource* Graphics::ensureDlssNrOutput(ID3D12Resource* colour)
+{
+  if (!colour || !m_dev) return nullptr;
+  const auto desc = colour->GetDesc();
+  if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+      desc.Width == 0 || desc.Height == 0 || desc.SampleDesc.Count != 1)
+    return nullptr;
+  if (m_dlssNrOutput) {
+    const auto current = m_dlssNrOutput->GetDesc();
+    if (current.Width == desc.Width && current.Height == desc.Height &&
+        current.Format == desc.Format)
+      return m_dlssNrOutput.Get();
+    m_retiredDlssNrOutputs.push_back(std::move(m_dlssNrOutput));
+  }
+  auto outputDesc = desc;
+  outputDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+  outputDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+  D3D12_HEAP_PROPERTIES hp{};
+  hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+  hp.CreationNodeMask = 1;
+  hp.VisibleNodeMask = 1;
+  if (FAILED(m_dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE,
+      &outputDesc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+      IID_PPV_ARGS(&m_dlssNrOutput))))
+    return nullptr;
+  return m_dlssNrOutput.Get();
+}
+
+void Graphics::end() { cmd()->Close(); }
 
 bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t frameIndex)
 {
@@ -420,7 +524,7 @@ bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t 
   toCopy.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   toCopy.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
   toCopy.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-  m_cmd->ResourceBarrier(1, &toCopy);
+  cmd()->ResourceBarrier(1, &toCopy);
 
   D3D12_TEXTURE_COPY_LOCATION src{};
   src.pResource = back;
@@ -432,7 +536,7 @@ bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t 
   dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   dst.PlacedFootprint = footprint;
 
-  m_cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  cmd()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 
   D3D12_RESOURCE_BARRIER toRender{};
   toRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -440,7 +544,7 @@ bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t 
   toRender.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   toRender.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
   toRender.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-  m_cmd->ResourceBarrier(1, &toRender);
+  cmd()->ResourceBarrier(1, &toRender);
 
   m_screenshotReadback = readback;
   m_screenshotFootprint = footprint;
@@ -541,16 +645,22 @@ static bool writeScreenshotPng(const std::wstring& folder,
 
 bool Graphics::present()
 {
-  ID3D12CommandList* lists[] = { m_cmd.Get() };
+  // submitForInterop() may have already submitted m_cmd and continued the
+  // frame on m_cmdContinuation. Present must execute the currently active
+  // list, not replay the already-submitted original list.
+  ID3D12CommandList* lists[] = { cmd() };
   m_queue->ExecuteCommandLists(1, lists);
-  // Sync interval 0 = no vsync wait on CPU.
-  m_swap->Present(0, 0);
 
-  // Frame buffering: only wait on a fence from maxFrames-1 ago so the CPU
-  // never drains the GPU every frame (was the main stutter source).
+  // Fence the allocator slot BEFORE Present. FSR FG submits generation work
+  // inside Present on the same queue; that work does not use m_alloc[slot].
+  // Signaling after Present made begin() wait on FG completion and halved
+  // base-frame rate under frame generation.
   const uint64_t v = ++m_fenceValue;
   m_queue->Signal(m_fence.Get(), v);
-  m_frameFence[m_index] = v;
+  m_frameSlotFence[m_frameSlot] = v;
+
+  // Sync interval 0 = no vsync wait on CPU.
+  m_swap->Present(0, 0);
 
   // A screenshot is synchronized only on the frame that requested it.
   // This guarantees the PNG contains the post-FSR backbuffer while normal
@@ -580,22 +690,12 @@ bool Graphics::present()
     m_screenshotFrame = 0;
   }
 
-  const UINT bufCount = 2; // match swap chain BufferCount
-  if (m_fenceValue >= bufCount) {
-    const uint64_t waitFor = m_fenceValue - (bufCount - 1);
-    if (m_fence->GetCompletedValue() < waitFor) {
-      m_fence->SetEventOnCompletion(waitFor, m_fenceEvent);
-      WaitForSingleObject(m_fenceEvent, 1000);
-    }
-  }
-
   m_index = m_swap->GetCurrentBackBufferIndex();
-  // Wait only if this backbuffer is still in flight
-  const uint64_t bbFence = m_frameFence[m_index];
-  if (bbFence && m_fence->GetCompletedValue() < bbFence) {
-    m_fence->SetEventOnCompletion(bbFence, m_fenceEvent);
-    WaitForSingleObject(m_fenceEvent, 1000);
-  }
+  // The D3D12 queue serializes work that targets the same backbuffer. DXGI
+  // chooses the next available buffer; do not CPU-wait here for the prior
+  // buffer fence, which throttles base-frame submission under FSR FG.
+  m_frameSlot = (m_frameSlot + 1) % 3;
+  m_interopContinuation = false;
   return true;
 }
 
@@ -607,17 +707,11 @@ bool Graphics::waitForGpu()
   if (!m_queue || !m_fence) return false;
 
   // If the command list is open, close + execute it so the GPU sees it.
-  if (m_cmd) {
-    HRESULT hrClose = m_cmd->Close();
+  if (cmd()) {
+    HRESULT hrClose = cmd()->Close();
     if (SUCCEEDED(hrClose)) {
-      ID3D12CommandList* lists[] = { m_cmd.Get() };
+      ID3D12CommandList* lists[] = { cmd() };
       m_queue->ExecuteCommandLists(1, lists);
-    }
-    // Reset the allocator + list so the next begin() reuses cleanly.
-    if (m_alloc[m_index]) {
-      m_alloc[m_index]->Reset();
-      m_cmd->Reset(m_alloc[m_index].Get(), nullptr);
-      m_cmd->Close();
     }
   }
 

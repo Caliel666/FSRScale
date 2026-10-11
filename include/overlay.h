@@ -27,6 +27,22 @@ struct OverlayFrameLimitConfig {
   int method = 0; // 0=early/smooth, 1=late/snappy
 };
 
+struct OverlayDlssNrConfig {
+  bool enabled = false;
+  float modelScale = 1.0f;
+  int style = 0; // 0=Neutral, 1=Natural, 2=Cinematic
+  float structure = 1.0f;
+  float intensity = 1.0f;
+  float colorStrength = 0.0f; // source chroma at 0, NR chroma at 1
+  int passes = 1; // neural refinement passes, 1..3
+  float localTone = 1.0f;
+  float maxRatio = 2.0f;
+  float skinStructure = -1.0f;
+  float historyStrength = 0.8f;
+  bool automaticSkinMask = true;
+  bool stabilizer = false; // motion-only residual stabilizer
+};
+
 // ── Overlay API ───────────────────────────────────────────────────────────
 // The overlay has two parts:
 //   1. Top bar (buttons: FSR / FPS / Camera / Settings) — only visible when
@@ -46,6 +62,9 @@ bool overlayConsumeScreenshot();            // returns true once when Camera but
 bool overlayConsumeFrameLimitToggle();       // returns true once when the CAP button is clicked
 OverlayFrameLimitConfig overlayFrameLimitConfig();
 bool overlayConsumeFgToggle();                // returns true once when the FG button is clicked
+bool overlayConsumeDlssNrToggle();            // returns true once when the NR button is clicked
+const OverlayDlssNrConfig& overlayDlssNrConfig();
+void overlaySetDlssNrEnabled(bool enabled);
 bool overlayFgEnabled();
 float overlaySharpness();
 void overlaySetFgEnabled(bool enabled);

@@ -49,6 +49,9 @@ static bool g_toggleFsr = false, g_screenshot = false, g_toggleFrameLimit = fals
 static OverlayFrameLimitConfig g_frameLimit{};
 static bool g_fgEnabled = false;
 static bool g_fgActive = false;
+static bool g_toggleDlssNr = false;
+static bool g_dlssNrTab = false;
+static OverlayDlssNrConfig g_dlssNr{};
 static float g_sharpness = 0.65f;
 static OverlayHudConfig g_cfg{};
 static std::wstring g_shotPath;
@@ -78,6 +81,19 @@ static void loadCfg() {
   g_frameLimit.fps = frame_limit::clampFps(GetPrivateProfileIntW(L"FrameLimiter", L"fps", 60, ini.c_str()));
   g_frameLimit.method = frame_limit::normalizeMethod(GetPrivateProfileIntW(L"FrameLimiter", L"method", 0, ini.c_str()));
   g_fgEnabled = GetPrivateProfileIntW(L"FrameGeneration", L"enabled", 0, ini.c_str()) != 0;
+  g_dlssNr.enabled = GetPrivateProfileIntW(L"DLSSNR", L"enabled", 0, ini.c_str()) != 0;
+  g_dlssNr.modelScale = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"scale", 100, ini.c_str()), 25, 100) / 100.0f;
+  g_dlssNr.style = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"style", 0, ini.c_str()), 0, 2);
+  g_dlssNr.intensity = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"intensity", 100, ini.c_str()), 0, 200) / 100.0f;
+  g_dlssNr.colorStrength = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"color_strength", 0, ini.c_str()), 0, 100) / 100.0f;
+  g_dlssNr.localTone = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"local_tone", 100, ini.c_str()), 0, 200) / 100.0f;
+  g_dlssNr.maxRatio = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"max_ratio", 200, ini.c_str()), 100, 800) / 100.0f;
+  g_dlssNr.structure = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"structure", 100, ini.c_str()), 0, 200) / 100.0f;
+  g_dlssNr.skinStructure = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"skin_structure", -100, ini.c_str()), -100, 200) / 100.0f;
+  g_dlssNr.historyStrength = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"history_strength", 80, ini.c_str()), 0, 100) / 100.0f;
+  g_dlssNr.automaticSkinMask = GetPrivateProfileIntW(L"DLSSNR", L"automatic_skin_mask", 1, ini.c_str()) != 0;
+  g_dlssNr.stabilizer = GetPrivateProfileIntW(L"DLSSNR", L"stabilizer", 0, ini.c_str()) != 0;
+  g_dlssNr.passes = std::clamp<int>((int)GetPrivateProfileIntW(L"DLSSNR", L"passes", 1, ini.c_str()), 1, 3);
   g_sharpness = std::clamp(GetPrivateProfileIntW(L"FSR", L"sharpness", 65, ini.c_str()) / 100.0f, 0.0f, 1.0f);
   g_cfg.fps = GetPrivateProfileIntW(L"FPS", L"fps", 1, ini.c_str()) != 0;
   g_cfg.frametime = GetPrivateProfileIntW(L"FPS", L"frametime", 1, ini.c_str()) != 0;
@@ -115,6 +131,20 @@ static void saveCfg() {
   swprintf_s(limitValue, L"%d", g_frameLimit.fps); WritePrivateProfileStringW(L"FrameLimiter", L"fps", limitValue, ini.c_str());
   swprintf_s(limitValue, L"%d", g_frameLimit.method); WritePrivateProfileStringW(L"FrameLimiter", L"method", limitValue, ini.c_str());
   WritePrivateProfileStringW(L"FrameGeneration", L"enabled", g_fgEnabled ? L"1" : L"0", ini.c_str());
+  WritePrivateProfileStringW(L"DLSSNR", L"enabled", g_dlssNr.enabled ? L"1" : L"0", ini.c_str());
+  wchar_t nrValue[32]{};
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.modelScale * 100)); WritePrivateProfileStringW(L"DLSSNR", L"scale", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", g_dlssNr.style); WritePrivateProfileStringW(L"DLSSNR", L"style", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.intensity * 100)); WritePrivateProfileStringW(L"DLSSNR", L"intensity", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.colorStrength * 100)); WritePrivateProfileStringW(L"DLSSNR", L"color_strength", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.localTone * 100)); WritePrivateProfileStringW(L"DLSSNR", L"local_tone", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.maxRatio * 100)); WritePrivateProfileStringW(L"DLSSNR", L"max_ratio", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.structure * 100)); WritePrivateProfileStringW(L"DLSSNR", L"structure", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.skinStructure * 100)); WritePrivateProfileStringW(L"DLSSNR", L"skin_structure", nrValue, ini.c_str());
+  swprintf_s(nrValue, L"%d", (int)std::lround(g_dlssNr.historyStrength * 100)); WritePrivateProfileStringW(L"DLSSNR", L"history_strength", nrValue, ini.c_str());
+  WritePrivateProfileStringW(L"DLSSNR", L"automatic_skin_mask", g_dlssNr.automaticSkinMask ? L"1" : L"0", ini.c_str());
+  WritePrivateProfileStringW(L"DLSSNR", L"stabilizer", g_dlssNr.stabilizer ? L"1" : L"0", ini.c_str());
+  swprintf_s(nrValue, L"%d", std::clamp(g_dlssNr.passes, 1, 3)); WritePrivateProfileStringW(L"DLSSNR", L"passes", nrValue, ini.c_str());
   wchar_t sharpnessValue[16]{}; swprintf_s(sharpnessValue, L"%d", (int)std::lround(g_sharpness * 100.0f));
   WritePrivateProfileStringW(L"FSR", L"sharpness", sharpnessValue, ini.c_str());
 }
@@ -180,6 +210,7 @@ static void drawBtnIcon(HDC dc, RECT r, int kind, bool active) {
     SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(p);
   } else if (kind == 3) { RECT tr{cx-24, cy-8, cx+24, cy+8}; DrawTextW(dc, L"CAP", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
   } else if (kind == 4) { RECT tr{cx-22, cy-8, cx+22, cy+8}; DrawTextW(dc, L"FG", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+  } else if (kind == 5) { RECT tr{cx-22, cy-8, cx+22, cy+8}; DrawTextW(dc, L"NR", -1, &tr, DT_CENTER|DT_VCENTER|DT_SINGLELINE);
   } else { // Settings gear
     HPEN p = CreatePen(PS_SOLID, 2, c);
     auto op = (HPEN)SelectObject(dc, p);
@@ -205,9 +236,9 @@ static void paintTopBar(HWND h, HDC dc) {
   RECT rc{}; GetClientRect(h, &rc);
   HBRUSH bg = CreateSolidBrush(C_WIN);
   FillRect(dc, &rc, bg); DeleteObject(bg);
-  for (int i = 0; i < 6; ++i) {
+  for (int i = 0; i < 7; ++i) {
     RECT b = btnRect(i);
-    bool active = (i==0&&g_fsr) || (i==1&&g_fpsVisible) || (i==3&&g_frameLimit.enabled) || (i==4&&g_fgEnabled) || (i==5&&IsWindowVisible(g_settings));
+    bool active = (i==0&&g_fsr) || (i==1&&g_fpsVisible) || (i==3&&g_frameLimit.enabled) || (i==4&&g_fgEnabled) || (i==5&&g_dlssNr.enabled) || (i==6&&IsWindowVisible(g_settings));
     bool hot = (g_hoverBtn == i);
     HBRUSH br = CreateSolidBrush(active ? C_RED_TINT : (hot ? C_HOVER : C_GHOST));
     roundRect(dc, b, 6, br); DeleteObject(br);
@@ -380,6 +411,30 @@ static void paintSettings(HWND h, HDC dc) {
   HFONT title=makeFont(18,true); auto old=(HFONT)SelectObject(dc,title); SetBkMode(dc,TRANSPARENT); SetTextColor(dc,C_TEXT);
   RECT rt{24,10,rc.right-24,40}; DrawTextW(dc,L"NRLive Settings",-1,&rt,DT_LEFT|DT_VCENTER|DT_SINGLELINE); SelectObject(dc,old); DeleteObject(title);
   auto section=[&](const wchar_t* s,int y){HFONT f=makeFont(12,true);auto o=(HFONT)SelectObject(dc,f);SetTextColor(dc,C_RED);RECT r{24,y,rc.right-24,y+18};DrawTextW(dc,s,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);HPEN p=CreatePen(PS_SOLID,1,C_CARD2);auto op=(HPEN)SelectObject(dc,p);MoveToEx(dc,24,y+21,nullptr);LineTo(dc,rc.right-24,y+21);SelectObject(dc,op);DeleteObject(p);SelectObject(dc,o);DeleteObject(f);};
+  RECT tabGeneral{244, 10, 336, 38}, tabNr{344, 10, 456, 38};
+  HBRUSH tg = CreateSolidBrush(g_dlssNrTab ? C_GHOST : C_RED_TINT); FillRect(dc, &tabGeneral, tg); DeleteObject(tg);
+  HBRUSH tn = CreateSolidBrush(g_dlssNrTab ? C_RED_TINT : C_GHOST); FillRect(dc, &tabNr, tn); DeleteObject(tn);
+  drawText(dc, L"General", 260, 16, 12, C_TEXT, false);
+  drawText(dc, L"DLSSNR", 370, 16, 12, C_TEXT, false);
+  if (g_dlssNrTab) {
+    section(L"DLSSNR - BEFORE FSR", 58);
+    wchar_t value[80]{};
+    swprintf_s(value, L"Style: %s (click to cycle)", g_dlssNr.style == 0 ? L"Neutral" : g_dlssNr.style == 1 ? L"Natural" : L"Cinematic");
+    drawText(dc, value, 24, 86, 13, C_TEXT, false);
+    swprintf_s(value, L"Model scale: %.2f", g_dlssNr.modelScale); drawText(dc, value, 24, 122, 13, C_TEXT, false);
+    swprintf_s(value, L"Intensity: %.2f", g_dlssNr.intensity); drawText(dc, value, 24, 172, 13, C_TEXT, false);
+    swprintf_s(value, L"Multipass refinement: %d", g_dlssNr.passes); drawText(dc, value, 24, 472, 13, C_TEXT, false);
+     swprintf_s(value, L"NR colour blend: %.2f", g_dlssNr.colorStrength); drawText(dc, value, 24, 522, 13, C_TEXT, false);
+    swprintf_s(value, L"Structure: %.2f", g_dlssNr.structure); drawText(dc, value, 24, 222, 13, C_TEXT, false);
+    swprintf_s(value, L"Skin structure: %.2f", g_dlssNr.skinStructure); drawText(dc, value, 24, 272, 13, C_TEXT, false);
+    swprintf_s(value, L"Temporal history: %.2f", g_dlssNr.historyStrength); drawText(dc, value, 24, 322, 13, C_TEXT, false);
+    swprintf_s(value, L"Local tone: %.2f", g_dlssNr.localTone); drawText(dc, value, 24, 372, 13, C_TEXT, false);
+    swprintf_s(value, L"Highlight guard (max ratio): %.2f", g_dlssNr.maxRatio); drawText(dc, value, 24, 422, 13, C_TEXT, false);
+    drawText(dc, L"Colour 0 preserves source chroma; 1 uses neural chroma.", 24, 676, 10, C_DIM, false);
+    drawText(dc, L"Model weights are not included; see the DLSSNR setup instructions.", 24, 692, 10, C_DIM, false);
+    drawText(dc, g_saveStatus.c_str(), 24, 712, 10, C_MUTED, false);
+    return;
+  }
   section(L"FPS OVERLAY",58);
   section(L"APPEARANCE",148);
   section(L"FSR SHARPENING",278);
@@ -406,7 +461,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   case WM_LBUTTONUP: {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
       RECT b = btnRect(i);
       if (PtInRect(&b, p)) {
         if (i == 0) { g_fsr = !g_fsr; g_toggleFsr = true; }
@@ -414,11 +469,12 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         else if (i == 2) { g_screenshot = true; }
         else if (i == 3) { g_frameLimit.enabled = !g_frameLimit.enabled; g_toggleFrameLimit = true; saveCfg(); }
         else if (i == 4) { g_fgEnabled = !g_fgEnabled; g_toggleFg = true; saveCfg(); }
+        else if (i == 5) { g_dlssNr.enabled = !g_dlssNr.enabled; g_toggleDlssNr = true; saveCfg(); }
         else { if (IsWindowVisible(g_settings)) ShowWindow(g_settings, SW_HIDE);
           else { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
             wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
             SendMessageW(GetDlgItem(g_settings, 207), CB_SETCURSEL, g_frameLimit.method, 0);
-            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-620)/2, 480, 620, SWP_NOACTIVATE|SWP_SHOWWINDOW);
+            SetWindowPos(g_settings, HWND_TOPMOST, (sw-480)/2, (sh-740)/2, 480, 740, SWP_NOACTIVATE|SWP_SHOWWINDOW);
             InvalidateRect(g_settings, nullptr, TRUE); } }
         InvalidateRect(h, nullptr, FALSE); UpdateWindow(h); return 0;
       }
@@ -428,7 +484,7 @@ static LRESULT CALLBACK uiProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   case WM_MOUSEMOVE: {
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     int old = g_hoverBtn; g_hoverBtn = -1;
-    for (int i = 0; i < 6; ++i) { RECT b = btnRect(i); if (PtInRect(&b, p)) { g_hoverBtn = i; break; } }
+    for (int i = 0; i < 7; ++i) { RECT b = btnRect(i); if (PtInRect(&b, p)) { g_hoverBtn = i; break; } }
     if (g_hoverBtn != old) {
       InvalidateRect(h, nullptr, FALSE);
       TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, h, 0 };
@@ -459,6 +515,48 @@ static void drawOwnerButton(DRAWITEMSTRUCT* dis, const wchar_t* label, bool chec
   drawText(dc,label,box.right+8,r.top,13,C_TEXT,false);
 }
 
+static void setSettingsTab(HWND h, bool dlssNr) {
+  // Native child controls stay visible independently of the parent's custom
+  // paint path. Toggle both complete control sets, not just the NR controls.
+  static constexpr int generalIds[] = {
+    101,102,103,104,105,106,
+    201,202,203,204,205,206,207,208,
+    301,302,303,401,402,403,
+    601,602,603,604,605,606,607,608
+  };
+  for (int id : generalIds)
+    if (HWND control = GetDlgItem(h, id))
+      ShowWindow(control, dlssNr ? SW_HIDE : SW_SHOW);
+  for (int id = 510; id <= 522; ++id)
+    if (HWND control = GetDlgItem(h, id))
+      ShowWindow(control, dlssNr ? SW_SHOW : SW_HIDE);
+}
+
+static void saveSettingsFromButton(HWND h) {
+  // Both tabs share the same save action and feedback path.
+  saveCfg();
+  g_saveStatus = L"Saved to scaleconfig.ini";
+  InvalidateRect(h, nullptr, FALSE);
+}
+
+static void invalidateNrValue(HWND h, int controlId) {
+  int y = 122;
+  switch (controlId) {
+    case 511: y = 122; break;
+    case 512: y = 172; break;
+    case 513: y = 222; break;
+    case 514: y = 272; break;
+    case 515: y = 322; break;
+    case 518: y = 372; break;
+    case 519: y = 422; break;
+    case 521: y = 472; break;
+      case 522: y = 522; break;
+    default: return;
+  }
+  RECT valueArea{20, y - 2, 456, y + 22};
+  InvalidateRect(h, &valueArea, FALSE);
+}
+
 static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   if (m == WM_DRAWITEM) {
     DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)l;
@@ -470,6 +568,18 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
       case 104: drawOwnerButton(dis, L"Resolution", g_cfg.resolution); return TRUE;
       case 105: drawOwnerButton(dis, L"Background", g_cfg.background); return TRUE;
       case 106: drawOwnerButton(dis, L"Enabled", g_frameLimit.enabled); return TRUE;
+      case 510: drawOwnerButton(dis, g_dlssNr.style == 0 ? L"Style: Neutral" : g_dlssNr.style == 1 ? L"Style: Natural" : L"Style: Cinematic", true); return TRUE;
+      case 516: drawOwnerButton(dis, L"Automatic skin mask", g_dlssNr.automaticSkinMask); return TRUE;
+      case 517: drawOwnerButton(dis, L"Residual stabilizer (motion-only)", g_dlssNr.stabilizer); return TRUE;
+      case 520: {
+        HDC dc = dis->hDC; RECT r = dis->rcItem;
+        HBRUSH bg = CreateSolidBrush(C_RED); FillRect(dc, &r, bg); DeleteObject(bg);
+        SetBkMode(dc, TRANSPARENT); SetTextColor(dc, C_DARK);
+        HFONT font = makeFont(12, true); HFONT prior = (HFONT)SelectObject(dc, font);
+        DrawTextW(dc, L"Save settings", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(dc, prior); DeleteObject(font);
+        return TRUE;
+      }
       case 205: {
         HDC dc = dis->hDC; RECT r = dis->rcItem;
         HBRUSH bg = CreateSolidBrush(C_RED); FillRect(dc, &r, bg); DeleteObject(bg);
@@ -510,17 +620,40 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     EndPaint(h, &ps); return 0;
   }
   if (m == WM_NCHITTEST) {
+    // FPS is a visual-only HUD: never let it consume mouse hit-tests.
+    if (h == g_fps) return HTTRANSPARENT;
     POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
     ScreenToClient(h, &p);
-    if (p.y < 48) return HTCAPTION;
+    if (p.y < 48 && !((p.x >= 244 && p.x < 336) || (p.x >= 344 && p.x < 456))) return HTCAPTION;
     return HTCLIENT;
   }
+  if (m == WM_LBUTTONUP) {
+    POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+    if (p.y < 48 && p.x >= 244 && p.x < 336) {
+      g_dlssNrTab = false;
+      setSettingsTab(h, false);
+      InvalidateRect(h, nullptr, TRUE); UpdateWindow(h); return 0;
+    }
+    if (p.y < 48 && p.x >= 344 && p.x < 456) {
+      g_dlssNrTab = true;
+      setSettingsTab(h, true);
+      InvalidateRect(h, nullptr, TRUE); UpdateWindow(h); return 0;
+    }
+    return 0;
+  }
   if (m == WM_COMMAND) {
-    if (LOWORD(w) == 205 && HIWORD(w) == BN_CLICKED) {
-      saveCfg();
-      g_saveStatus = L"Saved to scaleconfig.ini";
-      InvalidateRect(h, nullptr, FALSE);
+    if ((LOWORD(w) == 205 || LOWORD(w) == 520) && HIWORD(w) == BN_CLICKED) {
+      saveSettingsFromButton(h);
       return 0;
+    }
+    if (LOWORD(w) == 510) {
+      g_dlssNr.style = (g_dlssNr.style + 1) % 3;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE); return 0;
+    }
+    if (LOWORD(w) == 516 || LOWORD(w) == 517) {
+      if (LOWORD(w) == 516) g_dlssNr.automaticSkinMask = !g_dlssNr.automaticSkinMask;
+      else g_dlssNr.stabilizer = !g_dlssNr.stabilizer;
+      saveCfg(); InvalidateRect(h, nullptr, FALSE); return 0;
     }
     if (LOWORD(w) >= 101 && LOWORD(w) <= 106) {
       // These are BS_OWNERDRAW controls, so Windows does not maintain a
@@ -571,7 +704,50 @@ static LRESULT CALLBACK settingsProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   }
   if (m == WM_HSCROLL) {
     HWND ctrl = (HWND)l;
-    if (ctrl == GetDlgItem(h, 208)) {
+    if (ctrl == GetDlgItem(h, 522)) {
+      g_dlssNr.colorStrength = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 521);
+    } else if (ctrl == GetDlgItem(h, 521)) {
+      g_dlssNr.passes = std::clamp((int)SendMessageW(ctrl, TBM_GETPOS, 0, 0), 1, 3);
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 521);
+    } else if (ctrl == GetDlgItem(h, 511)) {
+      g_dlssNr.modelScale = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 511);
+    } else if (ctrl == GetDlgItem(h, 512)) {
+      g_dlssNr.intensity = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 512);
+    } else if (ctrl == GetDlgItem(h, 513)) {
+      g_dlssNr.structure = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 513);
+    } else if (ctrl == GetDlgItem(h, 514)) {
+      g_dlssNr.skinStructure = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 514);
+    } else if (ctrl == GetDlgItem(h, 515)) {
+      g_dlssNr.historyStrength = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 515);
+    } else if (ctrl == GetDlgItem(h, 518)) {
+      g_dlssNr.localTone = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 518);
+    } else if (ctrl == GetDlgItem(h, 519)) {
+      g_dlssNr.maxRatio = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
+      // Avoid disk I/O and full-panel repaint for every thumb-tracking message.
+      if (HIWORD(w) != TB_THUMBTRACK) saveCfg();
+      invalidateNrValue(h, 519);
+    } else if (ctrl == GetDlgItem(h, 208)) {
       g_sharpness = (float)SendMessageW(ctrl, TBM_GETPOS, 0, 0) / 100.0f;
       wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
       SetWindowTextW(GetDlgItem(h, 303), sharpText);
@@ -600,43 +776,61 @@ bool overlayInit(HINSTANCE inst, HWND output) {
   c.lpfnWndProc = fpsProc;     c.lpszClassName = FPS_CLS; RegisterClassExW(&c);
   c.lpfnWndProc = settingsProc; c.lpszClassName = SET_CLS; RegisterClassExW(&c);
 
-  int barW = BAR_PAD*2 + 6*BTN_SIZE + 5*BTN_GAP;
+  int barW = BAR_PAD*2 + 7*BTN_SIZE + 6*BTN_GAP;
   g_ui = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, UI_CLS, L"",
     WS_POPUP, 0, 0, barW, BAR_PAD*2+BTN_SIZE, nullptr, nullptr, inst, nullptr);
 
   // FPS window — layered for per-pixel alpha via UpdateLayeredWindow
-  g_fps = CreateWindowExW(WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST,
+  g_fps = CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST,
     FPS_CLS, L"", WS_POPUP, 0, 0, 200, 100, nullptr, nullptr, inst, nullptr);
 
   // Settings panel
   { int sw=GetSystemMetrics(SM_CXSCREEN), sh=GetSystemMetrics(SM_CYSCREEN);
     g_settings = CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST, SET_CLS, L"",
-      WS_POPUP, (sw-480)/2, (sh-620)/2, 480, 620, nullptr, nullptr, inst, nullptr); }
+      WS_POPUP, (sw-480)/2, (sh-740)/2, 480, 740, nullptr, nullptr, inst, nullptr); }
 
   if (g_settings) {
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 84, 80, 22, g_settings, (HMENU)101, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 244, 82, 212, 24, g_settings, (HMENU)510, inst, nullptr);
+    auto makeNrSlider = [&](int id, int y, int minimum, int maximum, int value) {
+      HWND slider = CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|TBS_NOTICKS|TBS_AUTOTICKS, 140, y, 310, 28, g_settings, (HMENU)(INT_PTR)id, inst, nullptr);
+      SendMessageW(slider, TBM_SETRANGE, TRUE, MAKELONG(minimum, maximum));
+      SendMessageW(slider, TBM_SETPOS, TRUE, value);
+      return slider;
+    };
+    makeNrSlider(511, 118, 25, 100, (int)std::lround(g_dlssNr.modelScale * 100));
+    makeNrSlider(512, 168, 0, 200, (int)std::lround(g_dlssNr.intensity * 100));
+    makeNrSlider(513, 218, 0, 200, (int)std::lround(g_dlssNr.structure * 100));
+    makeNrSlider(514, 268, -100, 200, (int)std::lround(g_dlssNr.skinStructure * 100));
+    makeNrSlider(515, 318, 0, 100, (int)std::lround(g_dlssNr.historyStrength * 100));
+    makeNrSlider(518, 368, 0, 200, (int)std::lround(g_dlssNr.localTone * 100));
+    makeNrSlider(519, 418, 100, 800, (int)std::lround(g_dlssNr.maxRatio * 100));
+    makeNrSlider(521, 468, 1, 3, g_dlssNr.passes);
+     makeNrSlider(522, 518, 0, 100, (int)std::lround(g_dlssNr.colorStrength * 100));
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 568, 200, 22, g_settings, (HMENU)516, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 24, 598, 300, 22, g_settings, (HMENU)517, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 110, 84, 100, 22, g_settings, (HMENU)102, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 216, 84, 80, 22, g_settings, (HMENU)103, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 302, 84, 100, 22, g_settings, (HMENU)104, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 112, 100, 22, g_settings, (HMENU)105, inst, nullptr);
-    CreateWindowW(L"STATIC", L"Font size:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 178, 70, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Font size:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 178, 70, 18, g_settings, (HMENU)601, inst, nullptr);
     CreateWindowW(L"STATIC", L"24", WS_CHILD|WS_VISIBLE|SS_LEFT|SS_CENTER, 410, 178, 30, 18, g_settings, (HMENU)301, inst, nullptr);
     CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|WS_VISIBLE|TBS_NOTICKS|TBS_AUTOTICKS, 100, 174, 300, 26, g_settings, (HMENU)201, inst, nullptr);
     SendMessageW(GetDlgItem(g_settings, 201), TBM_SETRANGE, TRUE, MAKELONG(12, 48));
     SendMessageW(GetDlgItem(g_settings, 201), TBM_SETPOS, TRUE, g_cfg.fontSize);
-    CreateWindowW(L"STATIC", L"Bg alpha:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 214, 70, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Bg alpha:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 214, 70, 18, g_settings, (HMENU)602, inst, nullptr);
     CreateWindowW(L"STATIC", L"50%", WS_CHILD|WS_VISIBLE|SS_LEFT|SS_CENTER, 410, 214, 30, 18, g_settings, (HMENU)302, inst, nullptr);
     CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|WS_VISIBLE|TBS_NOTICKS|TBS_AUTOTICKS, 100, 210, 300, 26, g_settings, (HMENU)202, inst, nullptr);
     SendMessageW(GetDlgItem(g_settings, 202), TBM_SETRANGE, TRUE, MAKELONG(0, 100));
     SendMessageW(GetDlgItem(g_settings, 202), TBM_SETPOS, TRUE, (int)(g_cfg.background_alpha*100));
-    CreateWindowW(L"STATIC", L"Engine:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 250, 50, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Engine:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 250, 50, 18, g_settings, (HMENU)603, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 80, 246, 40, 22, g_settings, (HMENU)401, inst, nullptr);
-    CreateWindowW(L"STATIC", L"Text:", WS_CHILD|WS_VISIBLE|SS_LEFT, 130, 250, 40, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Text:", WS_CHILD|WS_VISIBLE|SS_LEFT, 130, 250, 40, 18, g_settings, (HMENU)604, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 174, 246, 40, 22, g_settings, (HMENU)402, inst, nullptr);
-    CreateWindowW(L"STATIC", L"Graph:", WS_CHILD|WS_VISIBLE|SS_LEFT, 224, 250, 40, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Graph:", WS_CHILD|WS_VISIBLE|SS_LEFT, 224, 250, 40, 18, g_settings, (HMENU)605, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON, 268, 246, 40, 22, g_settings, (HMENU)403, inst, nullptr);
     // FSR sharpening slider belongs to overlay settings.
-    CreateWindowW(L"STATIC", L"Sharpening amount", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 306, 130, 18, g_settings, nullptr, inst, nullptr);
+    CreateWindowW(L"STATIC", L"Sharpening amount", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 306, 130, 18, g_settings, (HMENU)606, inst, nullptr);
     wchar_t sharpText[16]{}; swprintf_s(sharpText, L"%.2f", g_sharpness);
     CreateWindowW(L"STATIC", sharpText, WS_CHILD|WS_VISIBLE|SS_LEFT, 410, 306, 40, 18, g_settings, (HMENU)303, inst, nullptr);
     CreateWindowExW(0, L"msctls_trackbar32", L"", WS_CHILD|WS_VISIBLE|TBS_NOTICKS|TBS_AUTOTICKS, 24, 326, 430, 26, g_settings, (HMENU)208, inst, nullptr);
@@ -644,24 +838,26 @@ bool overlayInit(HINSTANCE inst, HWND output) {
     SendMessageW(GetDlgItem(g_settings, 208), TBM_SETPOS, TRUE, (int)std::lround(g_sharpness * 100.0f));
     // Frame limiter controls
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 24, 376, 100, 22, g_settings, (HMENU)106, inst, nullptr);
-     CreateWindowW(L"STATIC", L"Cap FPS", WS_CHILD|WS_VISIBLE|SS_LEFT, 142, 378, 52, 18, g_settings, nullptr, inst, nullptr);
+     CreateWindowW(L"STATIC", L"Cap FPS", WS_CHILD|WS_VISIBLE|SS_LEFT, 142, 378, 52, 18, g_settings, (HMENU)607, inst, nullptr);
      CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD|WS_VISIBLE|ES_NUMBER|ES_AUTOHSCROLL, 196, 374, 58, 24, g_settings, (HMENU)206, inst, nullptr);
      HWND methodBox = CreateWindowW(L"COMBOBOX", L"", WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST|WS_VSCROLL, 266, 374, 188, 120, g_settings, (HMENU)207, inst, nullptr);
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Early - smoother");
      SendMessageW(methodBox, CB_ADDSTRING, 0, (LPARAM)L"Late - snappier");
      SendMessageW(methodBox, CB_SETCURSEL, g_frameLimit.method, 0);
      wchar_t fpsText[16]{}; swprintf_s(fpsText, L"%d", g_frameLimit.fps); SetWindowTextW(GetDlgItem(g_settings, 206), fpsText);
-     CreateWindowW(L"STATIC", L"Folder:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 440, 60, 18, g_settings, nullptr, inst, nullptr);
+     CreateWindowW(L"STATIC", L"Folder:", WS_CHILD|WS_VISIBLE|SS_LEFT, 24, 440, 60, 18, g_settings, (HMENU)608, inst, nullptr);
     g_pathEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_shotPath.c_str(),
       WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL, 24, 462, 340, 24, g_settings, (HMENU)203, inst, nullptr);
     CreateWindowW(L"BUTTON", L"Browse...", WS_CHILD|WS_VISIBLE, 374, 462, 80, 24, g_settings, (HMENU)204, inst, nullptr);
     CreateWindowW(L"BUTTON", L"", WS_CHILD|WS_VISIBLE|BS_OWNERDRAW, 342, 518, 112, 30, g_settings, (HMENU)205, inst, nullptr);
+    CreateWindowW(L"BUTTON", L"", WS_CHILD|BS_OWNERDRAW, 342, 632, 112, 30, g_settings, (HMENU)520, inst, nullptr);
     CheckDlgButton(g_settings, 101, g_cfg.fps ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 102, g_cfg.frametime ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 103, g_cfg.frame_timing ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 104, g_cfg.resolution ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_settings, 105, g_cfg.background ? BST_CHECKED : BST_UNCHECKED);
     SetWindowTextW(g_pathEdit, g_shotPath.c_str());
+    setSettingsTab(g_settings, false);
     ShowWindow(g_settings, SW_HIDE);
   }
 
@@ -705,7 +901,7 @@ void overlaySetOpen(bool open) {
     if (open) {
       ShowWindow(g_ui, SW_SHOWNOACTIVATE);
       RECT o{}; if (GetWindowRect(g_output, &o)) {
-        int barW = BAR_PAD*2 + 6*BTN_SIZE + 5*BTN_GAP;
+        int barW = BAR_PAD*2 + 7*BTN_SIZE + 6*BTN_GAP;
         int cx = o.left + (o.right - o.left - barW) / 2;
         SetWindowPos(g_ui, HWND_TOPMOST, cx, o.top+16, barW, BAR_PAD*2+BTN_SIZE, SWP_NOACTIVATE|SWP_SHOWWINDOW);
       }
@@ -757,6 +953,12 @@ bool overlayConsumeFrameLimitToggle() { bool v = g_toggleFrameLimit; g_toggleFra
 OverlayFrameLimitConfig overlayFrameLimitConfig() { return g_frameLimit; }
 float overlaySharpness() { return g_sharpness; }
 bool overlayConsumeFgToggle() { bool v = g_toggleFg; g_toggleFg = false; return v; }
+bool overlayConsumeDlssNrToggle() { bool v = g_toggleDlssNr; g_toggleDlssNr = false; return v; }
+const OverlayDlssNrConfig& overlayDlssNrConfig() { return g_dlssNr; }
+void overlaySetDlssNrEnabled(bool enabled) {
+  g_dlssNr.enabled = enabled; saveCfg();
+  if (g_ui) InvalidateRect(g_ui, nullptr, FALSE);
+}
 bool overlayFgEnabled() { return g_fgEnabled; }
 void overlaySetFgEnabled(bool enabled) {
   g_fgEnabled = enabled;

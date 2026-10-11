@@ -5,6 +5,7 @@
 #include <wrl.h>
 #include <cstdint>
 #include <string>
+#include <vector>
 using Microsoft::WRL::ComPtr;
 
 struct Size { uint32_t w = 0, h = 0; };
@@ -18,11 +19,17 @@ public:
   bool rebuildSwapChain(Size display);
   bool adoptSwapChain(IDXGISwapChain4* wrapped);
   bool begin();
+  // Submit the current prep command list and open a second list for the same frame.
+  // Used to place the cross-API DLSSNR pass between motion generation and FSR without a CPU wait.
+  bool submitForInterop();
+  ID3D12Resource* snapshotDlssNrInput(ID3D12Resource* colour, D3D12_RESOURCE_STATES colourState);
+  ID3D12Resource* ensureDlssNrOutput(ID3D12Resource* colour);
+  ID3D12Resource* dlssNrOutput() const { return m_dlssNrOutput.Get(); }
   void end();
   ID3D12Device* device() const { return m_dev.Get(); }
   IDXGISwapChain4* swapChain() const { return m_swap.Get(); }
   ID3D12CommandQueue* queue() const { return m_queue.Get(); }
-  ID3D12GraphicsCommandList* cmd() const { return m_cmd.Get(); }
+  ID3D12GraphicsCommandList* cmd() const { return (m_interopContinuation ? m_cmdContinuation : m_cmd).Get(); }
   ID3D12Resource* backbuffer() const { return m_back[m_index].Get(); }
   ID3D12Resource* upscaleOutput() const { return m_upscaleOutput.Get(); }
   ID3D12Resource* dummyDepth() const { return m_dummyDepth.Get(); }
@@ -68,11 +75,20 @@ private:
   ComPtr<ID3D12DescriptorHeap> m_rtv;
   ComPtr<ID3D12DescriptorHeap> m_srvHeap;
   ComPtr<ID3D12CommandAllocator> m_alloc[3];
+  ComPtr<ID3D12CommandAllocator> m_allocContinuation[3];
   ComPtr<ID3D12GraphicsCommandList> m_cmd;
+  ComPtr<ID3D12GraphicsCommandList> m_cmdContinuation;
+  bool m_interopContinuation = false;
+  ComPtr<ID3D12Resource> m_dlssNrInput;
+  std::vector<ComPtr<ID3D12Resource>> m_retiredDlssNrInputs;
+  D3D12_RESOURCE_STATES m_dlssNrInputState = D3D12_RESOURCE_STATE_COMMON;
+  ComPtr<ID3D12Resource> m_dlssNrOutput;
+  std::vector<ComPtr<ID3D12Resource>> m_retiredDlssNrOutputs;
   ComPtr<ID3D12Fence> m_fence;
   HANDLE m_fenceEvent = nullptr;
   uint64_t m_fenceValue = 0;
-  uint64_t m_frameFence[3]{};
+  uint64_t m_frameSlotFence[3]{};
+  uint32_t m_frameSlot = 0;
   ComPtr<ID3D12Resource> m_back[3];
   uint32_t m_index = 0;
   UINT m_rtvStride = 0;
