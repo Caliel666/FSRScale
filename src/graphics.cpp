@@ -124,20 +124,20 @@ void Graphics::blitToBackbuffer(ID3D12Resource* src)
   }
 
   ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
-  m_cmd->SetDescriptorHeaps(1, heaps);
-  m_cmd->SetGraphicsRootSignature(m_blitRs.Get());
-  m_cmd->SetPipelineState(m_blitPso.Get());
-  m_cmd->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+  cmd()->SetDescriptorHeaps(1, heaps);
+  cmd()->SetGraphicsRootSignature(m_blitRs.Get());
+  cmd()->SetPipelineState(m_blitPso.Get());
+  cmd()->SetGraphicsRootDescriptorTable(0, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
 
   D3D12_VIEWPORT vp{ 0, 0, (float)m_display.w, (float)m_display.h, 0, 1 };
   D3D12_RECT sc{ 0, 0, (LONG)m_display.w, (LONG)m_display.h };
-  m_cmd->RSSetViewports(1, &vp);
-  m_cmd->RSSetScissorRects(1, &sc);
+  cmd()->RSSetViewports(1, &vp);
+  cmd()->RSSetScissorRects(1, &sc);
 
   auto rtv = rtvHandle();
-  m_cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-  m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  m_cmd->DrawInstanced(3, 1, 0, 0);
+  cmd()->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+  cmd()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  cmd()->DrawInstanced(3, 1, 0, 0);
 }
 
 bool Graphics::createAuxTextures(Size render)
@@ -252,6 +252,8 @@ bool Graphics::buildSwapChain(Size display)
     m_dev->CreateRenderTargetView(m_back[i].Get(), nullptr, h);
     if (!m_alloc[i])
       hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_alloc[i])));
+    if (!m_allocContinuation[i])
+      hr(m_dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_allocContinuation[i])));
   }
 
   m_upscaleOutput.Reset();
@@ -348,7 +350,10 @@ bool Graphics::init(HWND output, Size render, Size display)
 
   hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_alloc[0].Get(),
                               nullptr, IID_PPV_ARGS(&m_cmd)));
-  hr(m_cmd->Close());
+  hr(cmd()->Close());
+  hr(m_dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_allocContinuation[0].Get(),
+                              nullptr, IID_PPV_ARGS(&m_cmdContinuation)));
+  hr(m_cmdContinuation->Close());
   hr(m_dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
   m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   return true;
@@ -356,17 +361,18 @@ bool Graphics::init(HWND output, Size render, Size display)
 
 bool Graphics::begin()
 {
+  m_interopContinuation = false;
   m_alloc[m_index]->Reset();
-  m_cmd->Reset(m_alloc[m_index].Get(), nullptr);
+  cmd()->Reset(m_alloc[m_index].Get(), nullptr);
 
   // The capture pipeline has no real game depth. Always clear the synthetic
   // depth to deterministic far depth before FSR sees it; an uninitialized
   // UAV here was a major source of temporal instability/smearing.
   if (m_dummyDepth && m_clearGpuHeap && m_clearCpuHeap) {
     ID3D12DescriptorHeap* heaps[] = { m_clearGpuHeap.Get() };
-    m_cmd->SetDescriptorHeaps(1, heaps);
+    cmd()->SetDescriptorHeaps(1, heaps);
     const FLOAT value[4] = { 0.f, 0.f, 0.f, 0.f };
-    m_cmd->ClearUnorderedAccessViewFloat(
+    cmd()->ClearUnorderedAccessViewFloat(
       m_clearGpuHeap->GetGPUDescriptorHandleForHeapStart(),
       m_clearCpuHeap->GetCPUDescriptorHandleForHeapStart(),
       m_dummyDepth.Get(), value, 0, nullptr);
@@ -374,7 +380,26 @@ bool Graphics::begin()
   return true;
 }
 
-void Graphics::end() { m_cmd->Close(); }
+bool Graphics::submitForInterop()
+{
+  if (m_interopContinuation || !m_cmd || !m_cmdContinuation || !m_queue)
+    return false;
+  if (FAILED(cmd()->Close()))
+    return false;
+  ID3D12CommandList* lists[] = { cmd() };
+  m_queue->ExecuteCommandLists(1, lists);
+
+  // The second allocator/list pair records the post-NR FSR work. The queue
+  // bridge inserts its own GPU fence wait; there is no CPU wait in this path.
+  if (FAILED(m_allocContinuation[m_index]->Reset()))
+    return false;
+  if (FAILED(m_cmdContinuation->Reset(m_allocContinuation[m_index].Get(), nullptr)))
+    return false;
+  m_interopContinuation = true;
+  return true;
+}
+
+void Graphics::end() { cmd()->Close(); }
 
 bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t frameIndex)
 {
@@ -420,7 +445,7 @@ bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t 
   toCopy.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   toCopy.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
   toCopy.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-  m_cmd->ResourceBarrier(1, &toCopy);
+  cmd()->ResourceBarrier(1, &toCopy);
 
   D3D12_TEXTURE_COPY_LOCATION src{};
   src.pResource = back;
@@ -432,7 +457,7 @@ bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t 
   dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   dst.PlacedFootprint = footprint;
 
-  m_cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  cmd()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 
   D3D12_RESOURCE_BARRIER toRender{};
   toRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -440,7 +465,7 @@ bool Graphics::captureBackbufferScreenshot(const std::wstring& folder, uint64_t 
   toRender.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   toRender.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
   toRender.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-  m_cmd->ResourceBarrier(1, &toRender);
+  cmd()->ResourceBarrier(1, &toRender);
 
   m_screenshotReadback = readback;
   m_screenshotFootprint = footprint;
@@ -608,7 +633,7 @@ bool Graphics::waitForGpu()
 
   // If the command list is open, close + execute it so the GPU sees it.
   if (m_cmd) {
-    HRESULT hrClose = m_cmd->Close();
+    HRESULT hrClose = cmd()->Close();
     if (SUCCEEDED(hrClose)) {
       ID3D12CommandList* lists[] = { m_cmd.Get() };
       m_queue->ExecuteCommandLists(1, lists);
@@ -616,8 +641,8 @@ bool Graphics::waitForGpu()
     // Reset the allocator + list so the next begin() reuses cleanly.
     if (m_alloc[m_index]) {
       m_alloc[m_index]->Reset();
-      m_cmd->Reset(m_alloc[m_index].Get(), nullptr);
-      m_cmd->Close();
+      cmd()->Reset(m_alloc[m_index].Get(), nullptr);
+      cmd()->Close();
     }
   }
 
