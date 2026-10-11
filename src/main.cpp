@@ -536,7 +536,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
           if (nrSettings.enabled) {
             const bool nrApplied = dlssNr.process(gfx, color.Get(),
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                mv, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, resetThisFrame, nrSettings);
+                mv, spec.motionMode == TargetSpec::MotionMode::Fast
+                      ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                      : (D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                resetThisFrame, nrSettings);
             cmd = gfx.cmd(); // the bridge may have switched recording to the continuation list
             if (!dlssNr.lastError().empty() && dlssNr.lastError() != lastDlssNrError) {
               lastDlssNrError = dlssNr.lastError();
