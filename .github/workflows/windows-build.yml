@@ -42,13 +42,12 @@ jobs:
           mkdir -p "$src/toolchain"
           git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$src/toolchain/Vulkan-Headers"
           DLSSNR_SOURCE="$src" bash scripts/build_dlssnr_bridge.sh build/dlssnr-runtime
+          bash "$src/windows/package/model-tools/build_extract_model.sh" build/dlssnr-runtime
+          rm -f build/dlssnr-runtime/dlssnr_extract_model
           runtime_dir="$(find "$RUNNER_TEMP/dlssnr-release" -type d -name dlssnr-amd -print -quit)"
-          tools_dir="$(find "$RUNNER_TEMP/dlssnr-release" -type d -name model-tools -print -quit)"
           test -n "$runtime_dir"
-          test -n "$tools_dir"
           cp -a "$runtime_dir" build/dlssnr-runtime/
           rm -f build/dlssnr-runtime/dlssnr-amd/dlssnr.bin
-          cp "$tools_dir/dlssnr_extract_model.exe" build/dlssnr-runtime/
           cp "$src/LICENSE" build/dlssnr-runtime/DLSSNR-AMD-LICENSE.txt
           cp "$src/windows/package/README.txt" build/dlssnr-runtime/DLSSNR-AMD-UPSTREAM-README.txt
           test -s build/dlssnr-runtime/NRLiveDlssNrBridge.dll
